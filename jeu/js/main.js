@@ -122,7 +122,6 @@ const hero = new Character(scene, 0, 0);
 const sparkles = new Sparkles(scene);
 const forest = new Forest(scene, sparkles);
 const seeds = new SeedThrower(scene, sparkles);
-const THROW_RANGE = 6; // portée du lancer de graine, en cases
 
 // Post-traitement : halo lumineux (bloom) sur les reflets et les poussières de lumière.
 const composer = new EffectComposer(renderer);
@@ -241,7 +240,7 @@ function updateCursor() {
   const y = map.isLand(x, z) ? LAND_TOP : WATER_LEVEL;
   cursor.position.set(x + 0.5, y + 0.02, z + 0.5);
   cursor.scale.set(size, 1, size);
-  const ok = state.mode === 'edit' || (state.shift ? map.isWalkable(x, z) : throwTargetError(x, z) === null);
+  const ok = state.mode === 'edit' || (state.shift ? throwTargetError(x, z) === null : map.isWalkable(x, z));
   cursor.material.color.set(ok ? 0xffffff : 0xff6b6b);
   cursorFill.material.color.set(ok ? 0xffffff : 0xff6b6b);
 }
@@ -309,9 +308,7 @@ function plantInFront() {
 
 // Raison pour laquelle on ne peut pas lancer de graine sur cette case (null si possible).
 function throwTargetError(x, z) {
-  const hx = hero.root.position.x - 0.5, hz = hero.root.position.z - 0.5;
   if (x === hero.gridX && z === hero.gridZ) return 'Vise une autre case';
-  if (Math.hypot(x - hx, z - hz) > THROW_RANGE + 0.5) return 'Trop loin pour lancer';
   if (map.hasTree(x, z)) return describeTree(x, z);
   if (!map.inBounds(x, z)) return 'Hors de la carte';
   return null;
@@ -394,10 +391,11 @@ canvas.addEventListener('pointerdown', (e) => {
     pushUndo();
     state.painting = true;
     paint(cell);
-  } else if (!e.shiftKey) {
+  } else if (e.shiftKey) {
     throwSeed(cell);
   } else {
-    cam.follow = true;
+    // Déplacement au clic : la caméra reste fixe (les flèches ou F la recentrent).
+    cam.follow = false;
     const fromX = hero.moving ? hero.moving.toX : hero.gridX;
     const fromZ = hero.moving ? hero.moving.toZ : hero.gridZ;
     if (map.hasTree(...cell)) {
@@ -506,7 +504,7 @@ function handleHeldKeys() {
 
 // ---------- Interface ----------
 const ui = {
-  modeButtons: document.querySelectorAll('[data-mode]'),
+  modeButtons: document.querySelectorAll('button[data-mode]'),
   brushButtons: document.querySelectorAll('[data-brush]'),
   sizeButtons: document.querySelectorAll('[data-size]'),
   editor: document.getElementById('editor'),
