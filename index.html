@@ -30,25 +30,129 @@
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       color: var(--text);
-      background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+      background: linear-gradient(180deg, var(--bg-top) 0%, #1a0b28 55%, var(--bg-bottom) 100%);
       background-color: var(--bg-bottom);
       height: 100dvh;
       user-select: none;
       -webkit-user-select: none;
     }
 
-    .stars {
+    /* ---------- Fond : nuit de cinéma ---------- */
+    .backdrop {
       position: fixed;
       inset: 0;
       pointer-events: none;
-      background-image:
-        radial-gradient(1.5px 1.5px at 12% 18%, #fff8 50%, transparent 51%),
-        radial-gradient(1px 1px at 80% 12%, #fff6 50%, transparent 51%),
-        radial-gradient(2px 2px at 65% 35%, #fff5 50%, transparent 51%),
-        radial-gradient(1px 1px at 25% 55%, #fff6 50%, transparent 51%),
-        radial-gradient(1.5px 1.5px at 90% 60%, #fff5 50%, transparent 51%),
-        radial-gradient(1px 1px at 45% 8%, #fff4 50%, transparent 51%),
-        radial-gradient(1.5px 1.5px at 6% 42%, #fff5 50%, transparent 51%);
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    /* Grandes lueurs colorées qui dérivent lentement */
+    .aurora {
+      position: absolute;
+      border-radius: 50%;
+      mix-blend-mode: screen;
+      will-change: transform;
+    }
+    .aurora.a1 {
+      width: 120vmax; height: 120vmax;
+      top: -70vmax; left: -55vmax;
+      background: radial-gradient(circle, rgba(255, 79, 139, 0.42) 0%, rgba(255, 79, 139, 0.12) 35%, transparent 62%);
+      animation: drift1 26s ease-in-out infinite alternate;
+    }
+    .aurora.a2 {
+      width: 130vmax; height: 130vmax;
+      bottom: -80vmax; right: -65vmax;
+      background: radial-gradient(circle, rgba(123, 63, 228, 0.5) 0%, rgba(123, 63, 228, 0.14) 35%, transparent 62%);
+      animation: drift2 32s ease-in-out infinite alternate;
+    }
+    .aurora.a3 {
+      width: 80vmax; height: 80vmax;
+      top: 15vh; left: -45vmax;
+      background: radial-gradient(circle, rgba(255, 176, 102, 0.22) 0%, transparent 60%);
+      animation: drift3 38s ease-in-out infinite alternate;
+    }
+    @keyframes drift1 { to { transform: translate(35vw, 28vh) scale(1.2); } }
+    @keyframes drift2 { to { transform: translate(-40vw, -32vh) scale(1.15); } }
+    @keyframes drift3 { to { transform: translate(55vw, 25vh) scale(0.85); } }
+
+    /* Faisceau du projecteur qui balaie doucement la salle */
+    .beam {
+      position: absolute;
+      top: -6vh;
+      left: 50%;
+      width: 160vw;
+      height: 125vh;
+      margin-left: -80vw;
+      transform-origin: 50% 0;
+      clip-path: polygon(48% 0, 52% 0, 100% 100%, 0 100%);
+      background: linear-gradient(180deg, rgba(255, 236, 214, 0.16) 0%, rgba(255, 214, 230, 0.06) 45%, transparent 80%);
+      mix-blend-mode: screen;
+      animation: sweep 14s ease-in-out infinite alternate, flicker 5s steps(1) infinite;
+    }
+    @keyframes sweep {
+      from { transform: rotate(-9deg); }
+      to   { transform: rotate(9deg); }
+    }
+    @keyframes flicker {
+      0%, 100% { opacity: 1; }
+      31% { opacity: 0.85; }
+      33% { opacity: 1; }
+      71% { opacity: 0.9; }
+      72% { opacity: 1; }
+    }
+
+    /* Étoiles qui scintillent */
+    .star {
+      position: absolute;
+      border-radius: 50%;
+      background: #fff;
+      animation: twinkle var(--t, 3s) ease-in-out infinite;
+      animation-delay: var(--d, 0s);
+    }
+    @keyframes twinkle {
+      0%, 100% { opacity: 0.15; transform: scale(0.7); }
+      50% { opacity: 0.9; transform: scale(1.15); }
+    }
+
+    /* Bulles de lumière qui montent */
+    .bokeh {
+      position: absolute;
+      top: 0;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--c) 0%, transparent 70%);
+      animation: rise var(--t, 30s) linear infinite;
+      animation-delay: var(--d, 0s);
+      will-change: transform;
+    }
+    @keyframes rise {
+      0%   { transform: translate(0, 110vh); opacity: 0; }
+      10%  { opacity: 1; }
+      50%  { transform: translate(var(--sway, 30px), 45vh); }
+      90%  { opacity: 1; }
+      100% { transform: translate(0, -25vh); opacity: 0; }
+    }
+
+    .vignette {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at 50% 45%, transparent 50%, rgba(5, 2, 10, 0.65) 100%);
+    }
+
+    /* Léger grain de pellicule */
+    .grain {
+      position: absolute;
+      inset: -50%;
+      opacity: 0.07;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      animation: grain 0.8s steps(5) infinite;
+    }
+    @keyframes grain {
+      0%   { transform: translate(0, 0); }
+      20%  { transform: translate(-4%, 3%); }
+      40%  { transform: translate(3%, -5%); }
+      60%  { transform: translate(-2%, 6%); }
+      80%  { transform: translate(5%, 1%); }
+      100% { transform: translate(0, 0); }
     }
 
     .moon {
@@ -56,8 +160,10 @@
       top: max(18px, env(safe-area-inset-top));
       right: 22px;
       font-size: 40px;
-      opacity: 0.85;
+      opacity: 0.9;
       pointer-events: none;
+      z-index: 1;
+      filter: drop-shadow(0 0 18px rgba(255, 214, 120, 0.45));
     }
 
     /* Le contenu occupe toute la hauteur de l'écran */
@@ -255,14 +361,24 @@
     .walker .floor-shadow { opacity: 0.25; }
 
     @media (prefers-reduced-motion: reduce) {
-      .emoji, #yes, .walker, .walker svg, .walker .leg, .walker .arm { animation: none; }
+      .emoji, #yes, .walker, .walker svg, .walker .leg, .walker .arm,
+      .backdrop, .backdrop * { animation: none !important; }
+      .bokeh { display: none; }
       #no.escaping { transition: none; }
       .walker { display: none; }
     }
   </style>
 </head>
 <body>
-  <div class="stars"></div>
+  <div class="backdrop" aria-hidden="true">
+    <div class="aurora a1"></div>
+    <div class="aurora a2"></div>
+    <div class="aurora a3"></div>
+    <div class="beam"></div>
+    <div id="sky"></div>
+    <div class="vignette"></div>
+    <div class="grain"></div>
+  </div>
   <div class="moon">🌙</div>
 
   <!-- Modèle de petit cœur avec des bras et des jambes -->
@@ -333,6 +449,33 @@
       var mailStatus = document.getElementById('mail-status');
 
       function rand(min, max) { return min + Math.random() * (max - min); }
+
+      /* ---------- Fond : étoiles et bulles de lumière ---------- */
+      var sky = document.getElementById('sky');
+      for (var i = 0; i < 55; i++) {
+        var st = document.createElement('span');
+        var size = rand(1, 2.6);
+        st.className = 'star';
+        st.style.width = st.style.height = size + 'px';
+        st.style.left = rand(0, 100) + '%';
+        st.style.top = rand(0, 100) + '%';
+        st.style.setProperty('--t', rand(2.2, 5.5) + 's');
+        st.style.setProperty('--d', -rand(0, 6) + 's');
+        sky.appendChild(st);
+      }
+      var bokehColors = ['rgba(255,79,139,.35)', 'rgba(170,110,255,.32)', 'rgba(255,190,120,.28)', 'rgba(255,160,200,.3)'];
+      for (var j = 0; j < 14; j++) {
+        var bk = document.createElement('span');
+        var d = rand(18, 80);
+        bk.className = 'bokeh';
+        bk.style.width = bk.style.height = d + 'px';
+        bk.style.left = rand(-5, 95) + '%';
+        bk.style.setProperty('--c', bokehColors[j % bokehColors.length]);
+        bk.style.setProperty('--t', rand(22, 42) + 's');
+        bk.style.setProperty('--d', -rand(0, 42) + 's');
+        bk.style.setProperty('--sway', rand(-50, 50) + 'px');
+        sky.appendChild(bk);
+      }
 
       /* ---------- Les petits cœurs qui se promènent ---------- */
       var heartColors = ['#ff4f8b', '#ff6b6b', '#ff9ec4', '#e0457b', '#ffb3c8'];
