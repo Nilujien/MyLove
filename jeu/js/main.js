@@ -10,6 +10,7 @@ import { GrassField } from './grass.js';
 import { Motes } from './motes.js';
 import { Forest, GROW_TIME, stageOf } from './trees.js';
 import { Sparkles } from './sparkles.js';
+import { SeedThrower } from './seeds.js';
 
 const MAP_SIZE = 24;
 const STORAGE_KEY = 'iso-jeu-carte-v1';
@@ -120,6 +121,8 @@ const motes = new Motes(scene);
 const hero = new Character(scene, 0, 0);
 const sparkles = new Sparkles(scene);
 const forest = new Forest(scene, sparkles);
+const seeds = new SeedThrower(scene, sparkles);
+const THROW_RANGE = 6; // portée du lancer de graine, en cases
 
 // Post-traitement : halo lumineux (bloom) sur les reflets et les poussières de lumière.
 const composer = new EffectComposer(renderer);
@@ -148,9 +151,9 @@ function buildGrid() {
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  gridLines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.15 }));
+  gridLines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 }));
   gridLines.renderOrder = 2;
-  gridLines.visible = state.mode === 'edit';
+  gridLines.visible = state.grid[state.mode];
   scene.add(gridLines);
 }
 
@@ -238,13 +241,26 @@ function updateCursor() {
   const y = map.isLand(x, z) ? LAND_TOP : WATER_LEVEL;
   cursor.position.set(x + 0.5, y + 0.02, z + 0.5);
   cursor.scale.set(size, 1, size);
-  const ok = state.mode === 'edit' || map.isWalkable(x, z);
+  const ok = state.mode === 'edit' || (state.shift ? map.isWalkable(x, z) : throwTargetError(x, z) === null);
   cursor.material.color.set(ok ? 0xffffff : 0xff6b6b);
   cursorFill.material.color.set(ok ? 0xffffff : 0xff6b6b);
 }
 
 // ---------- État, éditeur ----------
-const state = { mode: 'play', brush: TILE.GRASS, brushSize: 1, painting: false };
+const state = {
+  mode: 'play', brush: TILE.GRASS, brushSize: 1, painting: false, shift: false,
+  grid: loadGridPrefs(), // grille affichée ou non, par mode (touche G)
+};
+
+function loadGridPrefs() {
+  try { return { play: false, edit: true, ...JSON.parse(localStorage.getItem('iso-jeu-grille')) }; } catch { return { play: false, edit: true }; }
+}
+function toggleGrid() {
+  state.grid[state.mode] = !state.grid[state.mode];
+  if (gridLines) gridLines.visible = state.grid[state.mode];
+  try { localStorage.setItem('iso-jeu-grille', JSON.stringify(state.grid)); } catch { /* stockage indisponible */ }
+  toast(state.grid[state.mode] ? 'Grille affichée' : 'Grille masquée');
+}
 const undoStack = [];
 
 function brushCells([cx, cz]) {
@@ -287,6 +303,48 @@ function plantInFront() {
   grass.rebuild(map);
   hero.playPlant();
   sparkles.burst(x + 0.5, LAND_TOP + 0.05, z + 0.5, 24, { spread: 0.4, up: 0.8, life: 1, size: 8 });
+  saveMap();
+  toast('🌱 Graine plantée');
+}
+
+// Raison pour laquelle on ne peut pas lancer de graine sur cette case (null si possible).
+function throwTargetError(x, z) {
+  const hx = hero.root.position.x - 0.5, hz = hero.root.position.z - 0.5;
+  if (x === hero.gridX && z === hero.gridZ) return 'Vise une autre case';
+  if (Math.hypot(x - hx, z - hz) > THROW_RANGE + 0.5) return 'Trop loin pour lancer';
+  if (map.hasTree(x, z)) return describeTree(x, z);
+  if (!map.inBounds(x, z)) return 'Hors de la carte';
+  return null;
+}
+
+// Lance une graine vers la case visée ; elle germe à l'atterrissage si la case le permet.
+function throwSeed([x, z]) {
+  const err = throwTargetError(x, z);
+  if (err) { toast(err); return; }
+  const from = hero.root.position.clone();
+  hero.lookAt(x + 0.5 - from.x, z + 0.5 - from.z);
+  hero.playPlant();
+  from.y += 0.55;
+  const to = new THREE.Vector3(x + 0.5, (map.isLand(x, z) ? LAND_TOP : WATER_LEVEL) + 0.04, z + 0.5);
+  seeds.throw(from, to, () => landSeed(x, z, to));
+}
+
+function landSeed(x, z, at) {
+  if (!map.isLand(x, z)) {
+    sparkles.burst(at.x, at.y, at.z, 26, { spread: 0.35, up: 1.3, life: 0.8, size: 8, colors: sparkles.waterColors });
+    toast('💧 Plouf ! La graine a coulé');
+    return;
+  }
+  const heroThere = (hero.gridX === x && hero.gridZ === z) || (hero.moving && hero.moving.toX === x && hero.moving.toZ === z);
+  if (!map.canPlant(x, z) || heroThere) {
+    sparkles.burst(at.x, at.y + 0.1, at.z, 10, { spread: 0.2, up: 0.6, life: 0.6, size: 6 });
+    toast(heroThere ? 'La graine a rebondi sur le personnage' : 'Il y a déjà un arbre ici');
+    return;
+  }
+  map.plant(x, z);
+  forest.sync(map);
+  grass.rebuild(map);
+  sparkles.burst(at.x, at.y, at.z, 24, { spread: 0.4, up: 0.8, life: 1, size: 8 });
   saveMap();
   toast('🌱 Graine plantée');
 }
@@ -336,6 +394,8 @@ canvas.addEventListener('pointerdown', (e) => {
     pushUndo();
     state.painting = true;
     paint(cell);
+  } else if (!e.shiftKey) {
+    throwSeed(cell);
   } else {
     cam.follow = true;
     const fromX = hero.moving ? hero.moving.toX : hero.gridX;
@@ -366,6 +426,7 @@ canvas.addEventListener('pointermove', (e) => {
     panning = { x: e.clientX, y: e.clientY };
     return;
   }
+  state.shift = e.shiftKey;
   hoverCell = pickCell(e.clientX, e.clientY);
   if (state.painting && hoverCell) paint(hoverCell);
   updateTooltip(e.clientX, e.clientY);
@@ -408,6 +469,8 @@ window.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
   switch (e.code) {
     case 'Tab': e.preventDefault(); setMode(state.mode === 'play' ? 'edit' : 'play'); return;
+    case 'KeyG': toggleGrid(); return;
+    case 'ShiftLeft': case 'ShiftRight': state.shift = true; return;
     case 'KeyE': cam.rotation += 1; return;
     case 'KeyR': cam.rotation -= 1; return;
     case 'KeyF': cam.follow = true; return;
@@ -423,8 +486,11 @@ window.addEventListener('keydown', (e) => {
   const dir = MOVE_KEYS[e.code];
   if (dir) { e.preventDefault(); held.add(e.code); }
 });
-window.addEventListener('keyup', (e) => held.delete(e.code));
-window.addEventListener('blur', () => held.clear());
+window.addEventListener('keyup', (e) => {
+  held.delete(e.code);
+  if (e.key === 'Shift') state.shift = false;
+});
+window.addEventListener('blur', () => { held.clear(); state.shift = false; });
 
 // Déplacement continu tant qu'une touche est maintenue, une case à la fois.
 function handleHeldKeys() {
@@ -452,7 +518,7 @@ function setMode(mode) {
   document.body.dataset.mode = mode;
   ui.modeButtons.forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
   if (mode === 'play') cam.follow = true;
-  if (gridLines) gridLines.visible = mode === 'edit';
+  if (gridLines) gridLines.visible = state.grid[mode];
 }
 function setBrush(brush, switchToEditor = true) {
   state.brush = brush;
@@ -527,6 +593,7 @@ renderer.setAnimationLoop(() => {
   shared.uHero.value.copy(hero.root.position);
   terrain.update(dt);
   forest.update();
+  seeds.update(dt);
   sparkles.update(dt);
   if (hoverCell && map.hasTree(...hoverCell)) updateTooltip();
   updateCamera(dt);
@@ -535,4 +602,4 @@ renderer.setAnimationLoop(() => {
 });
 
 // Accès de débogage depuis la console.
-window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront };
+window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront, throwSeed };
