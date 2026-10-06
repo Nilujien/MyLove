@@ -51,7 +51,7 @@ export class Character {
 
   teleport(x, z) {
     this.gridX = x; this.gridZ = z;
-    this.path = []; this.moving = null;
+    this.path = []; this.moving = null; this.plan = null; this.showPath = false;
     this.snap();
   }
 
@@ -74,7 +74,13 @@ export class Character {
   get busy() { return this.moving !== null; }
 
   // Remplace le chemin à suivre (liste de [x, z]).
-  setPath(path) { this.path = path.slice(); }
+  // plan.face : case vers laquelle se tourner à l'arrivée ; plan.action : appelée à l'arrivée ;
+  // plan.show : affiche le tracé du chemin.
+  setPath(path, plan = {}) {
+    this.path = path.slice();
+    this.plan = plan;
+    this.showPath = !!plan.show && path.length > 0;
+  }
 
   // Pas unique au clavier : n'interrompt pas un pas en cours, il est mis en file.
   step(dx, dz, map) {
@@ -84,7 +90,8 @@ export class Character {
     const nx = fromX + dx, nz = fromZ + dz;
     if (!map.isWalkable(nx, nz)) return false;
     this.path = [[nx, nz]];
-    this.faceAfter = null;
+    this.plan = null;
+    this.showPath = false;
     return true;
   }
 
@@ -101,13 +108,16 @@ export class Character {
         this.face(nx - this.gridX, nz - this.gridZ);
         this.moving = { fromX: this.gridX, fromZ: this.gridZ, toX: nx, toZ: nz, t: 0 };
       } else {
-        this.path = [];
+        this.path = []; this.plan = null;
       }
     }
 
-    if (!this.moving && !this.path.length && this.faceAfter) {
-      this.face(this.faceAfter[0] - this.gridX, this.faceAfter[1] - this.gridZ);
-      this.faceAfter = null;
+    if (!this.moving && !this.path.length) {
+      this.showPath = false;
+      const plan = this.plan;
+      this.plan = null;
+      if (plan?.face) this.face(plan.face[0] - this.gridX, plan.face[1] - this.gridZ);
+      if (plan?.action) plan.action();
     }
 
     let hop = 0, swing = 0;

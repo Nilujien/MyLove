@@ -13,6 +13,13 @@ export const STAGES = [
   { from: 0.75, name: 'Arbre' },
   { from: 1, name: 'Arbre en fleurs' },
 ];
+// Rondins obtenus en coupant un arbre, selon sa croissance (0 : trop jeune).
+export function logsFor(g) {
+  if (g < 0.35) return 0;
+  if (g < 0.75) return 1;
+  return g < 1 ? 2 : 3;
+}
+
 export function stageOf(g) {
   let s = STAGES[0];
   for (const st of STAGES) if (g >= st.from) s = st;
@@ -170,8 +177,24 @@ export class Forest {
     this.scene = scene;
     this.sparkles = sparkles;
     this.trees = new Map();
+    this.falling = [];
     this.group = new THREE.Group();
     scene.add(this.group);
+  }
+
+  // Abat un arbre (déjà retiré de la carte) : il tremble, bascule à l'opposé de (dx, dz) puis disparaît.
+  fell(x, z, dx, dz) {
+    const key = `${x},${z}`;
+    const tree = this.trees.get(key);
+    if (!tree) return;
+    this.trees.delete(key);
+    const pivot = new THREE.Group();
+    pivot.position.copy(tree.root.position);
+    tree.root.position.set(0, 0, 0);
+    pivot.add(tree.root);
+    this.group.remove(tree.root);
+    this.group.add(pivot);
+    this.falling.push({ tree, pivot, t: 0, axis: new THREE.Vector3(dz, 0, -dx).normalize() });
   }
 
   sync(map) {
@@ -188,8 +211,22 @@ export class Forest {
 
   get(x, z) { return this.trees.get(`${x},${z}`); }
 
-  update() {
+  update(dt = 0) {
     const now = Date.now(), t = shared.uTime.value;
+    for (let i = this.falling.length - 1; i >= 0; i--) {
+      const f = this.falling[i];
+      f.t += dt;
+      const shake = f.t < 0.3 ? Math.sin(f.t * 60) * 0.06 * (1 - f.t / 0.3) : 0;
+      const k = Math.min(1, Math.max(0, (f.t - 0.3) / 0.55));
+      f.pivot.quaternion.setFromAxisAngle(f.axis, k * k * 1.45 + shake);
+      if (f.t > 0.95) f.pivot.scale.setScalar(Math.max(0.001, 1 - (f.t - 0.95) / 0.35));
+      if (f.t > 1.3) {
+        const p = f.pivot.position;
+        this.sparkles.burst(p.x, p.y + 0.15, p.z, 30, { spread: 0.7, up: 0.7, life: 1, size: 8, colors: this.sparkles.woodColors });
+        this.group.remove(f.pivot);
+        this.falling.splice(i, 1);
+      }
+    }
     for (const tree of this.trees.values()) {
       if (tree.update(now, t)) {
         const p = tree.root.position;
