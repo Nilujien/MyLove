@@ -8,6 +8,8 @@ import { Terrain, LAND_TOP, WATER_LEVEL, shared } from './terrain.js';
 import { Character } from './character.js';
 import { GrassField } from './grass.js';
 import { Motes } from './motes.js';
+import { Forest, GROW_TIME, stageOf } from './trees.js';
+import { Sparkles } from './sparkles.js';
 
 const MAP_SIZE = 24;
 const STORAGE_KEY = 'iso-jeu-carte-v1';
@@ -73,6 +75,7 @@ function updateProjection() {
   camera.top = v; camera.bottom = -v;
   camera.updateProjectionMatrix();
   motes.setView(cam.zoom, renderer.getPixelRatio());
+  sparkles.setScale(cam.zoom * renderer.getPixelRatio());
 }
 window.addEventListener('resize', resize);
 
@@ -115,6 +118,8 @@ const terrain = new Terrain(scene);
 const grass = new GrassField(scene);
 const motes = new Motes(scene);
 const hero = new Character(scene, 0, 0);
+const sparkles = new Sparkles(scene);
+const forest = new Forest(scene, sparkles);
 
 // Post-traitement : halo lumineux (bloom) sur les reflets et les poussières de lumière.
 const composer = new EffectComposer(renderer);
@@ -126,6 +131,7 @@ composer.addPass(new OutputPass());
 function refreshWorld() {
   terrain.rebuild(map);
   grass.rebuild(map);
+  forest.sync(map);
   buildGrid();
 }
 
@@ -136,7 +142,7 @@ function buildGrid() {
   const pts = [];
   const seg = (x0, z0, x1, z1, y) => pts.push(x0, y, z0, x1, y, z1);
   for (let z = 0; z < map.height; z++) for (let x = 0; x < map.width; x++) {
-    const y = (map.isWalkable(x, z) ? LAND_TOP : WATER_LEVEL) + 0.005;
+    const y = (map.isLand(x, z) ? LAND_TOP : WATER_LEVEL) + 0.005;
     seg(x, z, x + 1, z, y); seg(x, z, x, z + 1, y);
     seg(x + 1, z, x + 1, z + 1, y); seg(x, z + 1, x + 1, z + 1, y);
   }
@@ -205,12 +211,19 @@ const cursorFill = new THREE.Mesh(
 cursor.add(cursorFill);
 let hoverCell = null;
 
+function isShown(o) {
+  for (; o; o = o.parent) if (!o.visible) return false;
+  return true;
+}
+
 function pickCell(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObjects([terrain.landMesh, terrain.waterMesh], false)[0];
+  const hit = raycaster.intersectObjects([terrain.landMesh, terrain.waterMesh, forest.group], true)
+    .find((h) => isShown(h.object)) ?? null;
   if (!hit) return null;
+  for (let o = hit.object; o; o = o.parent) if (o.userData.cell) return o.userData.cell;
   const p = hit.point.clone();
   if (hit.object === terrain.landMesh && hit.face) p.addScaledVector(hit.face.normal, -0.01);
   const x = Math.floor(p.x), z = Math.floor(p.z);
@@ -222,7 +235,7 @@ function updateCursor() {
   if (!hoverCell) return;
   const size = state.mode === 'edit' && state.brush !== 'hero' ? state.brushSize : 1;
   const [x, z] = hoverCell;
-  const y = map.isWalkable(x, z) ? LAND_TOP : WATER_LEVEL;
+  const y = map.isLand(x, z) ? LAND_TOP : WATER_LEVEL;
   cursor.position.set(x + 0.5, y + 0.02, z + 0.5);
   cursor.scale.set(size, 1, size);
   const ok = state.mode === 'edit' || map.isWalkable(x, z);
@@ -245,24 +258,65 @@ function paint(cell) {
     if (map.isWalkable(...cell)) hero.teleport(...cell);
     return;
   }
-  let changed = false;
+  let changed = false, treesChanged = false;
   for (const [x, z] of brushCells(cell)) {
-    if (state.brush === TILE.WATER && x === hero.gridX && z === hero.gridZ) continue;
+    const onHero = x === hero.gridX && z === hero.gridZ;
+    if (state.brush === 'tree') {
+      // Arbre déjà adulte en mode édition.
+      if (!onHero && map.plant(x, z, Date.now() - GROW_TIME * 1000)) treesChanged = true;
+      continue;
+    }
+    if (state.brush === TILE.WATER && onHero) continue;
+    // Les pinceaux de terrain effacent les arbres.
+    if (map.removeTree(x, z)) treesChanged = true;
     changed = map.set(x, z, state.brush) || changed;
   }
   if (changed) refreshWorld();
+  else if (treesChanged) { forest.sync(map); grass.rebuild(map); }
+}
+
+// Plante une graine sur la case devant le personnage.
+function plantInFront() {
+  const [x, z] = hero.front;
+  if (!map.canPlant(x, z)) {
+    toast(map.hasTree(x, z) ? describeTree(x, z) : 'Impossible de planter ici');
+    return;
+  }
+  map.plant(x, z);
+  forest.sync(map);
+  grass.rebuild(map);
+  hero.playPlant();
+  sparkles.burst(x + 0.5, LAND_TOP + 0.05, z + 0.5, 24, { spread: 0.4, up: 0.8, life: 1, size: 8 });
+  saveMap();
+  toast('🌱 Graine plantée');
+}
+
+function describeTree(x, z) {
+  const tree = forest.get(x, z);
+  if (!tree) return '';
+  const g = tree.growth();
+  if (g >= 1) return `🌸 ${stageOf(g).name}`;
+  const left = Math.ceil((1 - g) * GROW_TIME);
+  return `🌳 ${stageOf(g).name} · ${Math.floor(g * 100)} % (encore ${left} s)`;
+}
+
+let toastTimer = 0;
+function toast(text) {
+  const el = document.getElementById('toast');
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
 }
 
 function pushUndo() {
-  undoStack.push({ tiles: map.tiles.slice(), w: map.width, h: map.height });
+  undoStack.push(map.toJSON());
   if (undoStack.length > 50) undoStack.shift();
 }
 function undo() {
   const s = undoStack.pop();
   if (!s) return;
-  const m = new GameMap(s.w, s.h);
-  m.tiles.set(s.tiles);
-  setMap(m);
+  setMap(GameMap.fromJSON(s));
   saveMap();
 }
 
@@ -286,8 +340,20 @@ canvas.addEventListener('pointerdown', (e) => {
     cam.follow = true;
     const fromX = hero.moving ? hero.moving.toX : hero.gridX;
     const fromZ = hero.moving ? hero.moving.toZ : hero.gridZ;
+    if (map.hasTree(...cell)) {
+      // Clic sur un arbre : aller à côté et se tourner vers lui.
+      let best = null;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = cell[0] + dx, nz = cell[1] + dz;
+        const p = nx === fromX && nz === fromZ ? [] : map.findPath(fromX, fromZ, nx, nz);
+        if (p && (!best || p.length < best.length)) best = p;
+      }
+      if (best) { hero.setPath(best); hero.faceAfter = cell; }
+      toast(describeTree(...cell));
+      return;
+    }
     const path = map.findPath(fromX, fromZ, cell[0], cell[1]);
-    if (path) hero.setPath(path);
+    if (path) { hero.setPath(path); hero.faceAfter = null; }
   }
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -302,6 +368,7 @@ canvas.addEventListener('pointermove', (e) => {
   }
   hoverCell = pickCell(e.clientX, e.clientY);
   if (state.painting && hoverCell) paint(hoverCell);
+  updateTooltip(e.clientX, e.clientY);
 });
 const endPointer = () => {
   if (state.painting) saveMap();
@@ -310,7 +377,17 @@ const endPointer = () => {
 };
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
-canvas.addEventListener('pointerleave', () => { hoverCell = null; });
+canvas.addEventListener('pointerleave', () => { hoverCell = null; updateTooltip(); });
+
+// Infobulle : stade de croissance de l'arbre survolé.
+function updateTooltip(px, py) {
+  const el = document.getElementById('tooltip');
+  const text = hoverCell && map.hasTree(...hoverCell) ? describeTree(...hoverCell) : '';
+  el.hidden = !text;
+  if (!text) return;
+  if (px !== undefined) { el.style.left = `${px + 14}px`; el.style.top = `${py + 14}px`; }
+  el.textContent = text;
+}
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   cam.zoom = THREE.MathUtils.clamp(cam.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 0.35, 3);
@@ -337,7 +414,9 @@ window.addEventListener('keydown', (e) => {
     case 'Digit1': setBrush(TILE.GRASS); return;
     case 'Digit2': setBrush(TILE.DIRT); return;
     case 'Digit3': setBrush(TILE.WATER); return;
-    case 'Digit4': setBrush('hero'); return;
+    case 'Digit4': setBrush('tree'); return;
+    case 'Digit5': setBrush('hero'); return;
+    case 'Space': e.preventDefault(); if (state.mode === 'play') plantInFront(); return;
   }
   if (e.key === '-' || e.key === '[') { setBrushSize(Math.max(1, state.brushSize - 2)); return; }
   if (e.key === '+' || e.key === '=' || e.key === ']') { setBrushSize(Math.min(5, state.brushSize + 2)); return; }
@@ -387,12 +466,14 @@ function setBrushSize(n) {
 
 ui.modeButtons.forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
 ui.brushButtons.forEach((b) => b.addEventListener('click', () => {
-  setBrush(b.dataset.brush === 'hero' ? 'hero' : Number(b.dataset.brush));
+  const v = b.dataset.brush;
+  setBrush(v === 'hero' || v === 'tree' ? v : Number(v));
 }));
 ui.sizeButtons.forEach((b) => b.addEventListener('click', () => setBrushSize(Number(b.dataset.size))));
 
 const actions = {
   undo,
+  plant: plantInFront,
   new: () => { pushUndo(); setMap(new GameMap(MAP_SIZE, MAP_SIZE, TILE.GRASS)); saveMap(); },
   random: () => { pushUndo(); setMap(GameMap.random(MAP_SIZE, MAP_SIZE), true); saveMap(); },
   export: () => {
@@ -405,7 +486,7 @@ const actions = {
   },
   import: () => ui.file.click(),
 };
-document.querySelectorAll('[data-action]').forEach((b) => b.addEventListener('click', () => actions[b.dataset.action]()));
+document.querySelectorAll('[data-action]').forEach((b) => b.addEventListener('click', () => { b.blur(); actions[b.dataset.action](); }));
 ui.file.addEventListener('change', async () => {
   const f = ui.file.files[0];
   ui.file.value = '';
@@ -445,10 +526,13 @@ renderer.setAnimationLoop(() => {
   hero.update(dt, map);
   shared.uHero.value.copy(hero.root.position);
   terrain.update(dt);
+  forest.update();
+  sparkles.update(dt);
+  if (hoverCell && map.hasTree(...hoverCell)) updateTooltip();
   updateCamera(dt);
   updateCursor();
   composer.render(dt);
 });
 
 // Accès de débogage depuis la console.
-window.game = { get map() { return map; }, hero, cam, setMap, terrain };
+window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront };

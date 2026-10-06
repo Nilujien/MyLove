@@ -344,7 +344,7 @@ export class Terrain {
       let best = R * R;
       for (let z = bz - R; z <= bz + R; z++) {
         for (let x = bx - R; x <= bx + R; x++) {
-          if (!map.isWalkable(x, z)) continue;
+          if (!map.isLand(x, z)) continue;
           const dx = Math.max(x - px, 0, px - (x + 1));
           const dz = Math.max(z - pz, 0, pz - (z + 1));
           best = Math.min(best, dx * dx + dz * dz);

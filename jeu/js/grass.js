@@ -87,7 +87,7 @@ export class GrassField {
     const up = new THREE.Vector3(0, 1, 0);
     for (let z = 0; z < map.height; z++) for (let x = 0; x < map.width; x++) {
       const t = map.get(x, z);
-      if (t === TILE.WATER) continue;
+      if (t === TILE.WATER || map.hasTree(x, z)) continue;
       const g = [cornerGrassiness(map, x, z), cornerGrassiness(map, x, z + 1), cornerGrassiness(map, x + 1, z + 1), cornerGrassiness(map, x + 1, z)];
       if (t === TILE.DIRT && Math.max(...g) === 0) continue;
       const cut = chamferedCorners(map, x, z);

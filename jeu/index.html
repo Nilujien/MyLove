@@ -60,7 +60,18 @@
     button.active { border-color: var(--accent); background: rgba(255, 207, 74, 0.18); }
     .swatch { width: 14px; height: 14px; border-radius: 4px; display: inline-block; box-shadow: inset 0 -3px 0 rgba(0,0,0,.25); }
 
-    body[data-mode="play"] .edit-only { display: none; }
+    body[data-mode="play"] .edit-only, body[data-mode="edit"] .play-only { display: none; }
+
+    #toast {
+      position: fixed; left: 50%; top: 72px; transform: translate(-50%, -8px);
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 999px;
+      padding: 6px 14px; opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none;
+    }
+    #toast.show { opacity: 1; transform: translate(-50%, 0); }
+    #tooltip {
+      position: fixed; pointer-events: none; font-size: 12px;
+      background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px; padding: 4px 8px;
+    }
 
     #help { bottom: 12px; left: 12px; color: var(--muted); font-size: 12px; max-width: calc(100vw - 24px); }
     #help kbd {
@@ -70,7 +81,6 @@
       border-radius: 4px;
       padding: 1px 5px;
     }
-    body[data-mode="play"] #help .edit-only, body[data-mode="edit"] #help .play-only { display: none; }
   </style>
   <script type="importmap">
     {
@@ -90,13 +100,18 @@
       <button data-mode="play" title="Tab">🚶 Jouer</button>
       <button data-mode="edit" title="Tab">🛠️ Éditer</button>
     </div>
+    <div class="sep play-only"></div>
+    <div class="group play-only">
+      <button data-action="plant" title="Espace">🌱 Planter</button>
+    </div>
     <div class="sep edit-only"></div>
     <div class="group edit-only">
       <span class="label">Pinceau</span>
       <button data-brush="0" title="1"><span class="swatch" style="background:#7ac553"></span>Herbe</button>
       <button data-brush="1" title="2"><span class="swatch" style="background:#c29462"></span>Terre</button>
       <button data-brush="2" title="3"><span class="swatch" style="background:#3d9fd6"></span>Eau</button>
-      <button data-brush="hero" title="4">🧍 Perso</button>
+      <button data-brush="tree" title="4">🌳 Arbre</button>
+      <button data-brush="hero" title="5">🧍 Perso</button>
     </div>
     <div class="sep edit-only"></div>
     <div class="group edit-only">
@@ -116,9 +131,12 @@
     </div>
   </div>
 
+  <div id="toast"></div>
+  <div id="tooltip" hidden></div>
+
   <div id="help" class="panel">
-    <span class="play-only"><kbd>Flèches</kbd>/<kbd>ZQSD</kbd> se déplacer · clic : aller à la case ·</span>
-    <span class="edit-only">clic gauche : peindre · <kbd>1</kbd>–<kbd>4</kbd> pinceau · <kbd>-</kbd>/<kbd>+</kbd> taille · <kbd>Ctrl+Z</kbd> annuler · clic droit : déplacer la vue · <kbd>F</kbd> recentrer ·</span>
+    <span class="play-only"><kbd>Flèches</kbd>/<kbd>ZQSD</kbd> se déplacer · clic : aller à la case · <kbd>Espace</kbd> planter un arbre devant soi ·</span>
+    <span class="edit-only">clic gauche : peindre · <kbd>1</kbd>–<kbd>5</kbd> pinceau · <kbd>-</kbd>/<kbd>+</kbd> taille · <kbd>Ctrl+Z</kbd> annuler · clic droit : déplacer la vue · <kbd>F</kbd> recentrer ·</span>
     <span><kbd>E</kbd>/<kbd>R</kbd> pivoter · molette : zoom · <kbd>Tab</kbd> jouer/éditer</span>
   </div>
 
