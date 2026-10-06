@@ -44,11 +44,12 @@ export class Sparkles {
     this.points.renderOrder = 6;
     scene.add(this.points);
     this.colors = [new THREE.Color(0xfff2c4), new THREE.Color(0xc8f7d8), new THREE.Color(0xffd0ec)];
+    this.waterColors = [new THREE.Color(0xbff4ff), new THREE.Color(0x8fe0f0), new THREE.Color(0xffffff)];
   }
 
   setScale(s) { this.material.uniforms.uScale.value = s; }
 
-  burst(x, y, z, count = 30, { spread = 0.35, up = 1.2, life = 1.2, size = 9 } = {}) {
+  burst(x, y, z, count = 30, { spread = 0.35, up = 1.2, life = 1.2, size = 9, colors = this.colors } = {}) {
     for (let n = 0; n < count; n++) {
       const i = this.next; this.next = (this.next + 1) % MAX;
       const a = Math.random() * Math.PI * 2, r = Math.random() * spread;
@@ -56,7 +57,7 @@ export class Sparkles {
       this.vel.set([Math.cos(a) * r * 1.5, up * (0.4 + Math.random() * 0.8), Math.sin(a) * r * 1.5], i * 3);
       this.maxLife[i] = this.life[i] = life * (0.6 + Math.random() * 0.6);
       this.size[i] = size * (0.5 + Math.random());
-      this.colors[(Math.random() * this.colors.length) | 0].toArray(this.col, i * 3);
+      colors[(Math.random() * colors.length) | 0].toArray(this.col, i * 3);
     }
   }
 

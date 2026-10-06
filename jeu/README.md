@@ -3,8 +3,8 @@
 Base de jeu 3D isométrique (Three.js, sans étape de build) : ouvrir `jeu/index.html` via un serveur
 (ex. `python3 -m http.server` puis http://localhost:8000/jeu/) ou GitHub Pages.
 
-- **Grille stricte** : le personnage se déplace case par case (flèches / ZQSD, ou clic avec recherche de chemin).
-- **Arbres** : `Espace` (ou « Planter ») sème une graine devant le personnage. Elle devient pousse, jeune arbre puis arbre, qui fleurit une fois adulte (≈ 90 s, en temps réel : la croissance continue jeu fermé). Les arbres bloquent le passage ; survoler ou cliquer un arbre affiche son stade.
+- **Grille stricte** : le personnage se déplace case par case (flèches / ZQSD, ou `Maj`+clic avec recherche de chemin). `G` affiche ou masque la grille.
+- **Arbres** : un clic gauche lance une graine sur la case visée (portée 6 cases ; dans l'eau, elle coule). `Espace` (ou « Planter ») sème une graine devant le personnage. Elle devient pousse, jeune arbre puis arbre, qui fleurit une fois adulte (≈ 90 s, en temps réel : la croissance continue jeu fermé). Les arbres bloquent le passage ; survoler ou cliquer un arbre affiche son stade.
 - **Éditeur** (`Tab`) : pinceaux Herbe, Terre, Eau (qui effacent les arbres), Arbre (adulte) et placement du personnage, tailles 1/3/5, annuler, carte vide/aléatoire, export/import JSON. La carte est sauvegardée automatiquement dans le navigateur.
 - **Tuiles connectées** : le maillage du terrain est recalculé selon les voisins de chaque case — falaises de terre (avec liseré d'herbe) face à l'eau, coins extérieurs arrondis, fondu herbe/terre entre cases, écume le long des rives.
 - **Rendu éthéré** : herbe procédurale (nuances, fleurs) et brins animés par le vent qui s'écartent au passage du personnage ; eau en shader (profondeur, reflets, éclats, écume animée, caustiques sur le fond) ; ciel d'aube pastel, poussières de lumière et halo lumineux (bloom).
@@ -18,6 +18,7 @@ Base de jeu 3D isométrique (Three.js, sans étape de build) : ouvrir `jeu/index
 - `js/motes.js` — poussières de lumière flottantes.
 - `js/noise.glsl.js` — bruit GLSL partagé.
 - `js/trees.js` — arbres et leur croissance.
+- `js/seeds.js` — graines lancées en cloche.
 - `js/sparkles.js` — gerbes d'étincelles.
 - `js/character.js` — personnage et déplacement case par case.
 - `js/main.js` — scène, caméra isométrique, entrées, éditeur et interface.

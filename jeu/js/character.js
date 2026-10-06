@@ -64,6 +64,13 @@ export class Character {
 
   playPlant() { this.crouch = 1; }
 
+  // Se tourne vers un point quelconque (lancer), en gardant une direction de grille pour « devant ».
+  lookAt(dx, dz) {
+    if (!dx && !dz) return;
+    this.facing = Math.abs(dx) >= Math.abs(dz) ? [Math.sign(dx), 0] : [0, Math.sign(dz)];
+    this.targetYaw = Math.atan2(dx, dz);
+  }
+
   get busy() { return this.moving !== null; }
 
   // Remplace le chemin à suivre (liste de [x, z]).
