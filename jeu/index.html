@@ -7,20 +7,25 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏝️</text></svg>">
   <style>
     :root {
-      --panel: rgba(24, 32, 44, 0.82);
+      --panel: rgba(30, 26, 60, 0.72);
       --panel-border: rgba(255, 255, 255, 0.12);
       --text: #f3f6fa;
       --muted: #a9b6c6;
       --accent: #ffcf4a;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; overflow: hidden; background: #9fd3e6; }
+    html, body { height: 100%; overflow: hidden; background: #a99be0; }
     body {
       font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       color: var(--text);
       user-select: none;
     }
     #scene { display: block; width: 100vw; height: 100vh; touch-action: none; }
+    /* Vignette douce, pour l'ambiance éthérée. */
+    #vignette {
+      position: fixed; inset: 0; pointer-events: none;
+      background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(40, 30, 80, 0.35) 100%);
+    }
 
     .panel {
       position: fixed;
@@ -68,11 +73,17 @@
     body[data-mode="play"] #help .edit-only, body[data-mode="edit"] #help .play-only { display: none; }
   </style>
   <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
   </script>
 </head>
 <body data-mode="play">
   <canvas id="scene"></canvas>
+  <div id="vignette"></div>
 
   <div id="toolbar" class="panel">
     <div class="group">

@@ -1,7 +1,13 @@
 import * as THREE from 'three';
 import { GameMap, TILE } from './map.js';
-import { Terrain, LAND_TOP, WATER_LEVEL } from './terrain.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { Terrain, LAND_TOP, WATER_LEVEL, shared } from './terrain.js';
 import { Character } from './character.js';
+import { GrassField } from './grass.js';
+import { Motes } from './motes.js';
 
 const MAP_SIZE = 24;
 const STORAGE_KEY = 'iso-jeu-carte-v1';
@@ -12,12 +18,29 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x9fd3e6);
+// Ciel d'aube pastel, en dégradé.
+scene.background = (() => {
+  const c = document.createElement('canvas');
+  c.width = 2; c.height = 256;
+  const ctx = c.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#5f6fc4');
+  grad.addColorStop(0.45, '#a99be0');
+  grad.addColorStop(0.8, '#efc2dc');
+  grad.addColorStop(1, '#ffe2cf');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 2, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+})();
 
-scene.add(new THREE.HemisphereLight(0xdff3ff, 0x5c4630, 1.4));
-const sun = new THREE.DirectionalLight(0xfff1d6, 2.0);
+scene.add(new THREE.HemisphereLight(0xd6dcff, 0x6a4f6e, 1.1));
+const sun = new THREE.DirectionalLight(0xffe4c8, 2.0);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.bias = -0.0005;
@@ -38,11 +61,18 @@ const VIEW = 7; // demi-hauteur visible (en tuiles) à zoom 1
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false);
-  const aspect = w / h;
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(w, h);
+  updateProjection();
+}
+
+function updateProjection() {
+  const aspect = window.innerWidth / window.innerHeight;
   const v = VIEW / cam.zoom;
   camera.left = -v * aspect; camera.right = v * aspect;
   camera.top = v; camera.bottom = -v;
   camera.updateProjectionMatrix();
+  motes.setView(cam.zoom, renderer.getPixelRatio());
 }
 window.addEventListener('resize', resize);
 
@@ -82,7 +112,22 @@ function gridDirFromScreen(sx, sy) {
 // ---------- Monde ----------
 let map = loadMap() ?? GameMap.random(MAP_SIZE, MAP_SIZE);
 const terrain = new Terrain(scene);
+const grass = new GrassField(scene);
+const motes = new Motes(scene);
 const hero = new Character(scene, 0, 0);
+
+// Post-traitement : halo lumineux (bloom) sur les reflets et les poussières de lumière.
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.7, 0.82);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+function refreshWorld() {
+  terrain.rebuild(map);
+  grass.rebuild(map);
+  buildGrid();
+}
 
 // Grille affichée en mode édition.
 let gridLines = null;
@@ -105,12 +150,13 @@ function buildGrid() {
 
 function setMap(m, recenterHero = false) {
   map = m;
-  terrain.rebuild(map);
-  buildGrid();
+  refreshWorld();
   placeHeroSafely(recenterHero);
+  motes.setMapSize(map.width, map.height);
   const cx = map.width / 2, cz = map.height / 2;
   sun.position.set(cx + 14, 24, cz + 8);
   sun.target.position.set(cx, 0, cz);
+  shared.uSunDir.value.copy(sun.position).sub(sun.target.position).normalize();
   const s = sun.shadow.camera, r = Math.max(map.width, map.height) * 0.8;
   s.left = -r; s.right = r; s.top = r; s.bottom = -r; s.near = 1; s.far = 80;
   s.updateProjectionMatrix();
@@ -125,7 +171,7 @@ function placeHeroSafely(force = false) {
     const d = (x - map.width / 2) ** 2 + (z - map.height / 2) ** 2;
     if (d < bestD) { bestD = d; best = [x, z]; }
   }
-  if (!best) { map.set(0, 0, TILE.GRASS); terrain.rebuild(map); best = [0, 0]; }
+  if (!best) { map.set(0, 0, TILE.GRASS); refreshWorld(); best = [0, 0]; }
   hero.teleport(best[0], best[1]);
 }
 
@@ -204,7 +250,7 @@ function paint(cell) {
     if (state.brush === TILE.WATER && x === hero.gridX && z === hero.gridZ) continue;
     changed = map.set(x, z, state.brush) || changed;
   }
-  if (changed) { terrain.rebuild(map); buildGrid(); }
+  if (changed) refreshWorld();
 }
 
 function pushUndo() {
@@ -268,7 +314,7 @@ canvas.addEventListener('pointerleave', () => { hoverCell = null; });
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   cam.zoom = THREE.MathUtils.clamp(cam.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 0.35, 3);
-  resize();
+  updateProjection();
 }, { passive: false });
 
 // Flèches : haut = diagonale haut-droite de l'écran (convention isométrique).
@@ -397,10 +443,11 @@ renderer.setAnimationLoop(() => {
     handleHeldKeys();
   }
   hero.update(dt, map);
+  shared.uHero.value.copy(hero.root.position);
   terrain.update(dt);
   updateCamera(dt);
   updateCursor();
-  renderer.render(scene, camera);
+  composer.render(dt);
 });
 
 // Accès de débogage depuis la console.
