@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Île isométrique</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏝️</text></svg>">
+  <style>
+    :root {
+      --panel: rgba(24, 32, 44, 0.82);
+      --panel-border: rgba(255, 255, 255, 0.12);
+      --text: #f3f6fa;
+      --muted: #a9b6c6;
+      --accent: #ffcf4a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; background: #9fd3e6; }
+    body {
+      font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--text);
+      user-select: none;
+    }
+    #scene { display: block; width: 100vw; height: 100vh; touch-action: none; }
+
+    .panel {
+      position: fixed;
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      backdrop-filter: blur(6px);
+      padding: 8px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    #toolbar { top: 12px; left: 12px; right: 12px; width: fit-content; max-width: calc(100vw - 24px); }
+    .group { display: flex; gap: 4px; align-items: center; }
+    .sep { width: 1px; align-self: stretch; background: var(--panel-border); margin: 0 4px; }
+    .label { color: var(--muted); font-size: 12px; margin-right: 2px; }
+
+    button {
+      font: inherit;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    button:hover { background: rgba(255, 255, 255, 0.16); }
+    button.active { border-color: var(--accent); background: rgba(255, 207, 74, 0.18); }
+    .swatch { width: 14px; height: 14px; border-radius: 4px; display: inline-block; box-shadow: inset 0 -3px 0 rgba(0,0,0,.25); }
+
+    body[data-mode="play"] .edit-only { display: none; }
+
+    #help { bottom: 12px; left: 12px; color: var(--muted); font-size: 12px; max-width: calc(100vw - 24px); }
+    #help kbd {
+      font: 11px ui-monospace, monospace;
+      color: var(--text);
+      background: rgba(255,255,255,.1);
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+    body[data-mode="play"] #help .edit-only, body[data-mode="edit"] #help .play-only { display: none; }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+  </script>
+</head>
+<body data-mode="play">
+  <canvas id="scene"></canvas>
+
+  <div id="toolbar" class="panel">
+    <div class="group">
+      <button data-mode="play" title="Tab">🚶 Jouer</button>
+      <button data-mode="edit" title="Tab">🛠️ Éditer</button>
+    </div>
+    <div class="sep edit-only"></div>
+    <div class="group edit-only">
+      <span class="label">Pinceau</span>
+      <button data-brush="0" title="1"><span class="swatch" style="background:#7ac553"></span>Herbe</button>
+      <button data-brush="1" title="2"><span class="swatch" style="background:#c29462"></span>Terre</button>
+      <button data-brush="2" title="3"><span class="swatch" style="background:#3d9fd6"></span>Eau</button>
+      <button data-brush="hero" title="4">🧍 Perso</button>
+    </div>
+    <div class="sep edit-only"></div>
+    <div class="group edit-only">
+      <span class="label">Taille</span>
+      <button data-size="1">1</button>
+      <button data-size="3">3</button>
+      <button data-size="5">5</button>
+    </div>
+    <div class="sep edit-only"></div>
+    <div class="group edit-only">
+      <button data-action="undo" title="Ctrl+Z">↶ Annuler</button>
+      <button data-action="new">Vide</button>
+      <button data-action="random">Aléatoire</button>
+      <button data-action="export">Exporter</button>
+      <button data-action="import">Importer</button>
+      <input id="import-file" type="file" accept="application/json,.json" hidden>
+    </div>
+  </div>
+
+  <div id="help" class="panel">
+    <span class="play-only"><kbd>Flèches</kbd>/<kbd>ZQSD</kbd> se déplacer · clic : aller à la case ·</span>
+    <span class="edit-only">clic gauche : peindre · <kbd>1</kbd>–<kbd>4</kbd> pinceau · <kbd>-</kbd>/<kbd>+</kbd> taille · <kbd>Ctrl+Z</kbd> annuler · clic droit : déplacer la vue · <kbd>F</kbd> recentrer ·</span>
+    <span><kbd>E</kbd>/<kbd>R</kbd> pivoter · molette : zoom · <kbd>Tab</kbd> jouer/éditer</span>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
