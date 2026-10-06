@@ -32,11 +32,7 @@
       color: var(--text);
       background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
       background-color: var(--bg-bottom);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100dvh;
-      padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+      height: 100dvh;
       user-select: none;
       -webkit-user-select: none;
     }
@@ -48,39 +44,54 @@
       background-image:
         radial-gradient(1.5px 1.5px at 12% 18%, #fff8 50%, transparent 51%),
         radial-gradient(1px 1px at 80% 12%, #fff6 50%, transparent 51%),
-        radial-gradient(1.5px 1.5px at 65% 35%, #fff5 50%, transparent 51%),
-        radial-gradient(1px 1px at 25% 70%, #fff6 50%, transparent 51%),
-        radial-gradient(1.5px 1.5px at 90% 80%, #fff5 50%, transparent 51%),
-        radial-gradient(1px 1px at 45% 90%, #fff4 50%, transparent 51%);
+        radial-gradient(2px 2px at 65% 35%, #fff5 50%, transparent 51%),
+        radial-gradient(1px 1px at 25% 55%, #fff6 50%, transparent 51%),
+        radial-gradient(1.5px 1.5px at 90% 60%, #fff5 50%, transparent 51%),
+        radial-gradient(1px 1px at 45% 8%, #fff4 50%, transparent 51%),
+        radial-gradient(1.5px 1.5px at 6% 42%, #fff5 50%, transparent 51%);
     }
 
-    .card {
+    .moon {
+      position: fixed;
+      top: max(18px, env(safe-area-inset-top));
+      right: 22px;
+      font-size: 40px;
+      opacity: 0.85;
+      pointer-events: none;
+    }
+
+    /* Le contenu occupe toute la hauteur de l'écran */
+    .screen {
       position: relative;
+      z-index: 2;
+      height: 100%;
       width: 100%;
-      max-width: 420px;
-      text-align: center;
+      max-width: 520px;
+      margin: 0 auto;
+      padding: max(56px, calc(env(safe-area-inset-top) + 40px)) 20px calc(110px + env(safe-area-inset-bottom));
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 28px;
+      justify-content: space-evenly;
+      text-align: center;
     }
 
     .emoji {
-      font-size: 88px;
+      font-size: clamp(96px, 30vw, 140px);
       line-height: 1;
       animation: bob 2.4s ease-in-out infinite;
     }
 
     @keyframes bob {
       0%, 100% { transform: translateY(0) rotate(-4deg); }
-      50% { transform: translateY(-10px) rotate(4deg); }
+      50% { transform: translateY(-12px) rotate(4deg); }
     }
 
     h1 {
-      font-size: clamp(26px, 7.5vw, 34px);
-      line-height: 1.25;
+      font-size: clamp(34px, 10.5vw, 52px);
+      line-height: 1.15;
       font-weight: 800;
-      letter-spacing: -0.01em;
+      letter-spacing: -0.015em;
       text-wrap: balance;
     }
 
@@ -91,25 +102,25 @@
 
     .subtitle {
       color: var(--muted);
-      font-size: 16px;
-      margin-top: -12px;
+      font-size: clamp(19px, 5.4vw, 24px);
+      line-height: 1.4;
+      text-wrap: balance;
     }
 
     .buttons {
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 18px;
       width: 100%;
-      max-width: 280px;
-      margin-top: 8px;
+      max-width: 340px;
     }
 
     button {
       font: inherit;
-      font-size: 19px;
-      font-weight: 700;
+      font-size: clamp(22px, 6.5vw, 28px);
+      font-weight: 800;
       border-radius: 999px;
-      padding: 16px 28px;
+      padding: 20px 32px;
       cursor: pointer;
       touch-action: manipulation;
       border: 0;
@@ -118,11 +129,15 @@
 
     #yes {
       background: var(--yes);
-      box-shadow: 0 10px 30px var(--yes-shadow);
+      box-shadow: 0 12px 34px var(--yes-shadow);
       transition: transform 0.15s ease;
+      animation: pulse 1.8s ease-in-out infinite;
     }
 
-    #yes:active { transform: scale(0.96); }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 12px 34px var(--yes-shadow); }
+      50% { box-shadow: 0 12px 48px rgba(255, 79, 139, 0.75); }
+    }
 
     #no {
       background: var(--no);
@@ -130,7 +145,7 @@
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);
       white-space: nowrap;
-      z-index: 10;
+      z-index: 20;
     }
 
     #no.escaping {
@@ -139,27 +154,24 @@
     }
 
     .taunt {
-      min-height: 22px;
-      font-size: 15px;
+      min-height: 1.4em;
+      font-size: clamp(18px, 5vw, 22px);
+      font-weight: 600;
       color: var(--muted);
-      transition: opacity 0.2s;
     }
 
     /* Écran de réponse "Oui" */
-    .yay {
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      gap: 20px;
-    }
-
-    .yay .emoji { font-size: 96px; }
-
+    .yay { display: none; }
     .yay p {
       color: var(--muted);
-      font-size: 18px;
+      font-size: clamp(20px, 5.8vw, 26px);
       line-height: 1.5;
     }
+    .mail-status {
+      font-size: clamp(16px, 4.4vw, 19px) !important;
+      min-height: 1.5em;
+    }
+    .mail-status a { color: var(--yes); }
 
     body.accepted .question { display: none; }
     body.accepted .yay { display: flex; }
@@ -167,8 +179,9 @@
     .heart {
       position: fixed;
       bottom: -40px;
-      font-size: 28px;
+      font-size: 32px;
       pointer-events: none;
+      z-index: 30;
       animation: float-up linear forwards;
     }
 
@@ -176,53 +189,186 @@
       to { transform: translateY(-115dvh) rotate(30deg); opacity: 0; }
     }
 
+    /* ---------- Les petits chats ---------- */
+    .cats {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      overflow: hidden;
+    }
+
+    .cat {
+      position: absolute;
+      left: 0;
+      width: var(--size, 80px);
+      animation: walk var(--speed, 18s) linear infinite;
+      animation-delay: var(--delay, 0s);
+    }
+
+    .cat.reverse { animation-name: walk-back; }
+
+    .cat svg {
+      display: block;
+      width: 100%;
+      overflow: visible;
+      animation: trot 0.5s ease-in-out infinite;
+    }
+
+    .cat.reverse svg { transform: scaleX(-1); animation-name: trot-back; }
+
+    @keyframes walk {
+      from { transform: translateX(calc(-1 * var(--size, 80px) - 20px)); }
+      to   { transform: translateX(calc(100vw + 20px)); }
+    }
+    @keyframes walk-back {
+      from { transform: translateX(calc(100vw + 20px)); }
+      to   { transform: translateX(calc(-1 * var(--size, 80px) - 20px)); }
+    }
+    @keyframes trot {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-2px); }
+    }
+    @keyframes trot-back {
+      0%, 100% { transform: scaleX(-1) translateY(0); }
+      50% { transform: scaleX(-1) translateY(-2px); }
+    }
+
+    .cat .leg {
+      transform-box: fill-box;
+      transform-origin: 50% 0;
+      animation: step 0.5s ease-in-out infinite alternate;
+    }
+    .cat .leg.b { animation-delay: -0.5s; }
+
+    @keyframes step {
+      from { transform: rotate(22deg); }
+      to   { transform: rotate(-22deg); }
+    }
+
+    .cat .tail {
+      transform-box: fill-box;
+      transform-origin: 100% 100%;
+      animation: wag 1.2s ease-in-out infinite alternate;
+    }
+
+    @keyframes wag {
+      from { transform: rotate(-12deg); }
+      to   { transform: rotate(14deg); }
+    }
+
+    .cat .floor-shadow { opacity: 0.25; }
+
     @media (prefers-reduced-motion: reduce) {
-      .emoji { animation: none; }
+      .emoji, #yes, .cat, .cat svg, .cat .leg, .cat .tail { animation: none; }
       #no.escaping { transition: none; }
+      .cat { display: none; }
     }
   </style>
 </head>
 <body>
   <div class="stars"></div>
+  <div class="moon">🌙</div>
 
-  <main class="card">
-    <section class="question card">
-      <div class="emoji">🍿</div>
-      <h1>Veux-tu <em>faire semblant</em> de regarder un film avec moi ce soir&nbsp;?</h1>
-      <p class="subtitle">Canapé, plaid, et un film qu'on ne regardera pas vraiment 😏</p>
-      <div class="buttons">
-        <button id="yes" type="button">Oui 💖</button>
-        <button id="no" type="button">Pas ce soir</button>
-      </div>
-      <p class="taunt" id="taunt" aria-live="polite"></p>
-    </section>
+  <!-- Modèle de chat (côté, tourné vers la droite) -->
+  <template id="cat-template">
+    <div class="cat">
+      <svg viewBox="0 0 64 44" aria-hidden="true">
+        <ellipse class="floor-shadow" cx="30" cy="42" rx="20" ry="2" fill="#000"/>
+        <path class="tail" d="M14 22 C 6 20, 4 10, 9 4" stroke="var(--fur)" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <rect class="leg a" x="15" y="26" width="4" height="14" rx="2" fill="var(--fur-dark)"/>
+        <rect class="leg b" x="37" y="26" width="4" height="14" rx="2" fill="var(--fur-dark)"/>
+        <ellipse cx="29" cy="24" rx="17" ry="9" fill="var(--fur)"/>
+        <rect class="leg b" x="19" y="27" width="4" height="13" rx="2" fill="var(--fur)"/>
+        <rect class="leg a" x="41" y="27" width="4" height="13" rx="2" fill="var(--fur)"/>
+        <polygon points="42,12 44,1 50,9" fill="var(--fur)"/>
+        <polygon points="51,9 57,1 58,13" fill="var(--fur)"/>
+        <polygon points="44.5,10 45,5 48,9" fill="#ffb3c8"/>
+        <polygon points="53,9 56,5 56.5,11" fill="#ffb3c8"/>
+        <circle cx="50" cy="16" r="9" fill="var(--fur)"/>
+        <ellipse cx="53" cy="15" rx="1.4" ry="2" fill="#1b1020"/>
+        <ellipse cx="47.5" cy="15" rx="1.4" ry="2" fill="#1b1020"/>
+        <path d="M49.5 19 l1.3 1.2 l1.3 -1.2 z" fill="#ff7aa5"/>
+        <path d="M54 20 h7 M54 21.5 l6 1.5 M47 20 h-7 M47 21.5 l-6 1.5" stroke="#fff" stroke-opacity=".6" stroke-width=".5"/>
+      </svg>
+    </div>
+  </template>
+  <div class="cats" id="cats"></div>
 
-    <section class="yay" aria-live="polite">
-      <div class="emoji">🥰</div>
-      <h1>Je le savais&nbsp;!</h1>
-      <p>Rendez-vous ce soir sur le canapé.<br>Je m'occupe du pop-corn 🍿<br>(et on ne verra pas la fin du film).</p>
-    </section>
+  <main class="screen question">
+    <div class="emoji">🍿</div>
+    <h1>Veux-tu <em>faire semblant</em> de regarder un film avec moi ce soir&nbsp;?</h1>
+    <p class="subtitle">Canapé, plaid, et un film qu'on ne regardera pas vraiment&nbsp;😏</p>
+    <div class="buttons">
+      <button id="yes" type="button">Oui 💖</button>
+      <button id="no" type="button">Pas ce soir</button>
+    </div>
+    <p class="taunt" id="taunt" aria-live="polite"></p>
+  </main>
+
+  <main class="screen yay" aria-live="polite">
+    <div class="emoji">🥰</div>
+    <h1>Je le savais&nbsp;!</h1>
+    <p>Rendez-vous ce soir sur le canapé.<br>Je m'occupe du pop-corn 🍿<br>(et on ne verra pas la fin du film).</p>
+    <p class="mail-status" id="mail-status"></p>
   </main>
 
   <script>
     (function () {
+      // Adresse qui reçoit la bonne nouvelle
+      var EMAIL = 'julien.cua@gmail.com';
+
       var yes = document.getElementById('yes');
       var no = document.getElementById('no');
       var taunt = document.getElementById('taunt');
+      var mailStatus = document.getElementById('mail-status');
 
+      function rand(min, max) { return min + Math.random() * (max - min); }
+
+      /* ---------- Les chats qui se promènent ---------- */
+      var catColors = [
+        ['#f2a65a', '#d9873b'], // roux
+        ['#9aa0b5', '#7b8197'], // gris
+        ['#3a3045', '#2a2233'], // noir
+        ['#f3e3cf', '#d8c3a8'], // crème
+        ['#c98b5e', '#a86f45']  // tigré clair
+      ];
+      var catLanes = [
+        // [position verticale (bas de l'écran), taille, durée, sens inverse ?]
+        { bottom: 'calc(10px + env(safe-area-inset-bottom))', size: 86, speed: 16, reverse: false, delay: -3 },
+        { bottom: 'calc(14px + env(safe-area-inset-bottom))', size: 64, speed: 22, reverse: true,  delay: -12 },
+        { bottom: 'calc(58px + env(safe-area-inset-bottom))', size: 54, speed: 26, reverse: false, delay: -18 },
+        { bottom: 'calc(62px + env(safe-area-inset-bottom))', size: 48, speed: 30, reverse: true,  delay: -6 },
+        { top: 'max(12px, env(safe-area-inset-top))',         size: 44, speed: 28, reverse: false, delay: -9 }
+      ];
+      var tpl = document.getElementById('cat-template');
+      var catsBox = document.getElementById('cats');
+      catLanes.forEach(function (lane, i) {
+        var cat = tpl.content.firstElementChild.cloneNode(true);
+        var c = catColors[i % catColors.length];
+        cat.style.setProperty('--fur', c[0]);
+        cat.style.setProperty('--fur-dark', c[1]);
+        cat.style.setProperty('--size', lane.size + 'px');
+        cat.style.setProperty('--speed', lane.speed + 's');
+        cat.style.setProperty('--delay', lane.delay + 's');
+        if (lane.bottom) cat.style.bottom = lane.bottom;
+        if (lane.top) cat.style.top = lane.top;
+        if (lane.reverse) cat.classList.add('reverse');
+        catsBox.appendChild(cat);
+      });
+
+      /* ---------- Le bouton qui s'échappe ---------- */
       var taunts = [
         "Hmm, ce bouton a l'air timide…",
         "Raté ! 😜",
         "Tu es sûr(e) ?",
         "Ce choix n'est pas disponible ce soir.",
+        "Même les chats disent oui 🐱",
         "Essaie plutôt l'autre bouton 👀",
-        "Il est rapide, hein ?",
         "Erreur 404 : refus introuvable.",
         "Allez… dis oui 🥺"
       ];
       var escapes = 0;
-
-      function rand(min, max) { return min + Math.random() * (max - min); }
 
       function overlaps(a, b, margin) {
         return !(a.right + margin < b.left || a.left - margin > b.right ||
@@ -270,7 +416,7 @@
         escapes++;
 
         // Le bouton "Oui" grossit un peu à chaque tentative
-        var scale = Math.min(1 + escapes * 0.06, 1.5);
+        var scale = Math.min(1 + escapes * 0.05, 1.35);
         yes.style.transform = 'scale(' + scale + ')';
       }
 
@@ -288,13 +434,14 @@
       window.addEventListener('resize', function () {
         if (!no.classList.contains('escaping')) return;
         var r = no.getBoundingClientRect();
-        no.style.left = Math.min(r.left, window.innerWidth - r.width - 16) + 'px';
-        no.style.top = Math.min(r.top, window.innerHeight - r.height - 16) + 'px';
+        no.style.left = Math.max(16, Math.min(r.left, window.innerWidth - r.width - 16)) + 'px';
+        no.style.top = Math.max(16, Math.min(r.top, window.innerHeight - r.height - 16)) + 'px';
       });
 
+      /* ---------- Réponse "Oui" ---------- */
       function hearts() {
-        var symbols = ['💖', '💕', '🍿', '🎬', '💘', '✨'];
-        for (var i = 0; i < 28; i++) {
+        var symbols = ['💖', '💕', '🍿', '🎬', '💘', '✨', '🐱'];
+        for (var i = 0; i < 32; i++) {
           var s = document.createElement('span');
           s.className = 'heart';
           s.textContent = symbols[i % symbols.length];
@@ -306,11 +453,55 @@
         }
       }
 
+      function mailtoLink() {
+        return 'mailto:' + EMAIL +
+          '?subject=' + encodeURIComponent('Oui pour le film ce soir 💖') +
+          '&body=' + encodeURIComponent("C'est oui ! On fait semblant de regarder un film ce soir 🍿");
+      }
+
+      // Envoi du mail via FormSubmit (fonctionne sans serveur, idéal pour GitHub Pages)
+      function sendMail() {
+        mailStatus.textContent = 'Envoi de la bonne nouvelle… 💌';
+        var now = new Date();
+        fetch('https://formsubmit.co/ajax/' + EMAIL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({
+            _subject: '💖 C\'est OUI pour le film ce soir !',
+            _template: 'box',
+            _captcha: 'false',
+            reponse: 'OUI 💖',
+            message: 'Rendez-vous ce soir sur le canapé pour faire semblant de regarder un film 🍿',
+            tentatives_de_refus: escapes + ' fois sur « Pas ce soir »',
+            date: now.toLocaleString('fr-FR')
+          })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data && (data.success === true || data.success === 'true')) {
+              mailStatus.textContent = 'Message envoyé, la bonne nouvelle est arrivée 💌';
+            } else {
+              throw new Error('envoi refusé');
+            }
+          })
+          .catch(function () {
+            mailStatus.innerHTML = '';
+            var a = document.createElement('a');
+            a.href = mailtoLink();
+            a.textContent = 'Clique ici pour me prévenir par mail 💌';
+            mailStatus.appendChild(a);
+          });
+      }
+
+      var accepted = false;
       yes.addEventListener('click', function () {
+        if (accepted) return;
+        accepted = true;
         document.body.classList.add('accepted');
         no.style.display = 'none';
         if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
         hearts();
+        sendMail();
       });
     })();
   </script>
