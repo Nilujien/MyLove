@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#2b1035">
+  <title>Ce soir ?</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍿</text></svg>">
+  <style>
+    :root {
+      --bg-top: #2b1035;
+      --bg-bottom: #12091f;
+      --text: #fff4f7;
+      --muted: #e7c3d4;
+      --yes: #ff4f8b;
+      --yes-shadow: rgba(255, 79, 139, 0.45);
+      --no: rgba(255, 255, 255, 0.14);
+      --no-border: rgba(255, 255, 255, 0.35);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: var(--text);
+      background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+      background-color: var(--bg-bottom);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100dvh;
+      padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .stars {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        radial-gradient(1.5px 1.5px at 12% 18%, #fff8 50%, transparent 51%),
+        radial-gradient(1px 1px at 80% 12%, #fff6 50%, transparent 51%),
+        radial-gradient(1.5px 1.5px at 65% 35%, #fff5 50%, transparent 51%),
+        radial-gradient(1px 1px at 25% 70%, #fff6 50%, transparent 51%),
+        radial-gradient(1.5px 1.5px at 90% 80%, #fff5 50%, transparent 51%),
+        radial-gradient(1px 1px at 45% 90%, #fff4 50%, transparent 51%);
+    }
+
+    .card {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .emoji {
+      font-size: 88px;
+      line-height: 1;
+      animation: bob 2.4s ease-in-out infinite;
+    }
+
+    @keyframes bob {
+      0%, 100% { transform: translateY(0) rotate(-4deg); }
+      50% { transform: translateY(-10px) rotate(4deg); }
+    }
+
+    h1 {
+      font-size: clamp(26px, 7.5vw, 34px);
+      line-height: 1.25;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      text-wrap: balance;
+    }
+
+    h1 em {
+      font-style: italic;
+      color: var(--yes);
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 16px;
+      margin-top: -12px;
+    }
+
+    .buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      width: 100%;
+      max-width: 280px;
+      margin-top: 8px;
+    }
+
+    button {
+      font: inherit;
+      font-size: 19px;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 16px 28px;
+      cursor: pointer;
+      touch-action: manipulation;
+      border: 0;
+      color: var(--text);
+    }
+
+    #yes {
+      background: var(--yes);
+      box-shadow: 0 10px 30px var(--yes-shadow);
+      transition: transform 0.15s ease;
+    }
+
+    #yes:active { transform: scale(0.96); }
+
+    #no {
+      background: var(--no);
+      border: 1.5px solid var(--no-border);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      white-space: nowrap;
+      z-index: 10;
+    }
+
+    #no.escaping {
+      position: fixed;
+      transition: left 0.35s cubic-bezier(.2,.9,.3,1.3), top 0.35s cubic-bezier(.2,.9,.3,1.3);
+    }
+
+    .taunt {
+      min-height: 22px;
+      font-size: 15px;
+      color: var(--muted);
+      transition: opacity 0.2s;
+    }
+
+    /* Écran de réponse "Oui" */
+    .yay {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .yay .emoji { font-size: 96px; }
+
+    .yay p {
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.5;
+    }
+
+    body.accepted .question { display: none; }
+    body.accepted .yay { display: flex; }
+
+    .heart {
+      position: fixed;
+      bottom: -40px;
+      font-size: 28px;
+      pointer-events: none;
+      animation: float-up linear forwards;
+    }
+
+    @keyframes float-up {
+      to { transform: translateY(-115dvh) rotate(30deg); opacity: 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .emoji { animation: none; }
+      #no.escaping { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="stars"></div>
+
+  <main class="card">
+    <section class="question card">
+      <div class="emoji">🍿</div>
+      <h1>Veux-tu <em>faire semblant</em> de regarder un film avec moi ce soir&nbsp;?</h1>
+      <p class="subtitle">Canapé, plaid, et un film qu'on ne regardera pas vraiment 😏</p>
+      <div class="buttons">
+        <button id="yes" type="button">Oui 💖</button>
+        <button id="no" type="button">Pas ce soir</button>
+      </div>
+      <p class="taunt" id="taunt" aria-live="polite"></p>
+    </section>
+
+    <section class="yay" aria-live="polite">
+      <div class="emoji">🥰</div>
+      <h1>Je le savais&nbsp;!</h1>
+      <p>Rendez-vous ce soir sur le canapé.<br>Je m'occupe du pop-corn 🍿<br>(et on ne verra pas la fin du film).</p>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var yes = document.getElementById('yes');
+      var no = document.getElementById('no');
+      var taunt = document.getElementById('taunt');
+
+      var taunts = [
+        "Hmm, ce bouton a l'air timide…",
+        "Raté ! 😜",
+        "Tu es sûr(e) ?",
+        "Ce choix n'est pas disponible ce soir.",
+        "Essaie plutôt l'autre bouton 👀",
+        "Il est rapide, hein ?",
+        "Erreur 404 : refus introuvable.",
+        "Allez… dis oui 🥺"
+      ];
+      var escapes = 0;
+
+      function rand(min, max) { return min + Math.random() * (max - min); }
+
+      function overlaps(a, b, margin) {
+        return !(a.right + margin < b.left || a.left - margin > b.right ||
+                 a.bottom + margin < b.top || a.top - margin > b.bottom);
+      }
+
+      function escape(e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+
+        var rect = no.getBoundingClientRect();
+        var w = rect.width, h = rect.height;
+
+        // Première fuite : on fige la position actuelle avant de passer en position fixe
+        if (!no.classList.contains('escaping')) {
+          // Garde la place dans la mise en page pour que le bouton "Oui" ne bouge pas
+          var spacer = document.createElement('div');
+          spacer.style.height = h + 'px';
+          no.parentNode.insertBefore(spacer, no);
+          no.style.left = rect.left + 'px';
+          no.style.top = rect.top + 'px';
+          no.classList.add('escaping');
+          void no.offsetWidth; // force le reflow pour que la transition s'applique
+        }
+
+        var pad = 16;
+        var vw = window.innerWidth, vh = window.innerHeight;
+        var yesRect = yes.getBoundingClientRect();
+        var x, y, tries = 0, candidate;
+
+        // Cherche un endroit loin de la position actuelle et qui ne recouvre pas "Oui"
+        do {
+          x = rand(pad, Math.max(pad, vw - w - pad));
+          y = rand(pad, Math.max(pad, vh - h - pad));
+          candidate = { left: x, top: y, right: x + w, bottom: y + h };
+          tries++;
+        } while (tries < 50 && (
+          overlaps(candidate, yesRect, 12) ||
+          Math.hypot(x - rect.left, y - rect.top) < Math.min(vw, vh) * 0.35
+        ));
+
+        no.style.left = x + 'px';
+        no.style.top = y + 'px';
+
+        taunt.textContent = taunts[escapes % taunts.length];
+        escapes++;
+
+        // Le bouton "Oui" grossit un peu à chaque tentative
+        var scale = Math.min(1 + escapes * 0.06, 1.5);
+        yes.style.transform = 'scale(' + scale + ')';
+      }
+
+      // pointerdown couvre le tactile et la souris ; le clic qui suit est simplement bloqué
+      no.addEventListener('pointerdown', escape);
+      no.addEventListener('click', function (e) { e.preventDefault(); });
+      no.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') escape(e);
+      });
+      // Sur ordinateur, il s'échappe dès qu'on le survole
+      no.addEventListener('mouseenter', function () {
+        if (window.matchMedia('(hover: hover)').matches) escape();
+      });
+
+      window.addEventListener('resize', function () {
+        if (!no.classList.contains('escaping')) return;
+        var r = no.getBoundingClientRect();
+        no.style.left = Math.min(r.left, window.innerWidth - r.width - 16) + 'px';
+        no.style.top = Math.min(r.top, window.innerHeight - r.height - 16) + 'px';
+      });
+
+      function hearts() {
+        var symbols = ['💖', '💕', '🍿', '🎬', '💘', '✨'];
+        for (var i = 0; i < 28; i++) {
+          var s = document.createElement('span');
+          s.className = 'heart';
+          s.textContent = symbols[i % symbols.length];
+          s.style.left = rand(0, 95) + 'vw';
+          s.style.animationDuration = rand(3, 6) + 's';
+          s.style.animationDelay = rand(0, 1.5) + 's';
+          document.body.appendChild(s);
+          setTimeout(s.remove.bind(s), 8000);
+        }
+      }
+
+      yes.addEventListener('click', function () {
+        document.body.classList.add('accepted');
+        no.style.display = 'none';
+        if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
+        hearts();
+      });
+    })();
+  </script>
+</body>
+</html>
