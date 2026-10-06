@@ -7,6 +7,7 @@ export class GameMap {
     this.width = width;
     this.height = height;
     this.tiles = new Uint8Array(width * height).fill(fill);
+    this.trees = new Map(); // "x,z" -> { x, z, plantedAt } (horodatage en ms)
   }
 
   inBounds(x, z) {
@@ -25,10 +26,26 @@ export class GameMap {
     return true;
   }
 
-  isWalkable(x, z) {
+  isLand(x, z) {
     const t = this.get(x, z);
     return t === TILE.GRASS || t === TILE.DIRT;
   }
+
+  isWalkable(x, z) {
+    return this.isLand(x, z) && !this.hasTree(x, z);
+  }
+
+  hasTree(x, z) { return this.trees.has(`${x},${z}`); }
+
+  canPlant(x, z) { return this.isLand(x, z) && !this.hasTree(x, z); }
+
+  plant(x, z, plantedAt = Date.now()) {
+    if (!this.canPlant(x, z)) return false;
+    this.trees.set(`${x},${z}`, { x, z, plantedAt });
+    return true;
+  }
+
+  removeTree(x, z) { return this.trees.delete(`${x},${z}`); }
 
   // Plus court chemin sur la grille (4 directions), BFS.
   findPath(sx, sz, tx, tz) {
@@ -59,7 +76,10 @@ export class GameMap {
   }
 
   toJSON() {
-    return { version: 1, width: this.width, height: this.height, tiles: Array.from(this.tiles) };
+    return {
+      version: 2, width: this.width, height: this.height, tiles: Array.from(this.tiles),
+      trees: [...this.trees.values()].map(({ x, z, plantedAt }) => [x, z, plantedAt]),
+    };
   }
 
   static fromJSON(data) {
@@ -71,6 +91,10 @@ export class GameMap {
       throw new Error('Carte invalide : nombre de tuiles incorrect');
     }
     map.tiles.set(data.tiles.map((t) => (t in TILE_NAMES ? t : TILE.GRASS)));
+    for (const tree of Array.isArray(data.trees) ? data.trees : []) {
+      const [x, z, plantedAt] = tree;
+      if (Number.isInteger(x) && Number.isInteger(z) && Number.isFinite(plantedAt)) map.plant(x, z, plantedAt);
+    }
     return map;
   }
 

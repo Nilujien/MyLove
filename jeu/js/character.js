@@ -12,6 +12,8 @@ export class Character {
     this.path = [];
     this.moving = null; // { fromX, fromZ, toX, toZ, t }
     this.time = 0;
+    this.facing = [0, 1];
+    this.crouch = 0; // animation de plantation (1 -> 0)
 
     this.root = new THREE.Group();
     this.body = new THREE.Group();
@@ -53,6 +55,15 @@ export class Character {
     this.snap();
   }
 
+  // Case devant le personnage (selon sa dernière direction).
+  get front() {
+    const x = this.moving ? this.moving.toX : this.gridX;
+    const z = this.moving ? this.moving.toZ : this.gridZ;
+    return [x + this.facing[0], z + this.facing[1]];
+  }
+
+  playPlant() { this.crouch = 1; }
+
   get busy() { return this.moving !== null; }
 
   // Remplace le chemin à suivre (liste de [x, z]).
@@ -66,10 +77,12 @@ export class Character {
     const nx = fromX + dx, nz = fromZ + dz;
     if (!map.isWalkable(nx, nz)) return false;
     this.path = [[nx, nz]];
+    this.faceAfter = null;
     return true;
   }
 
   face(dx, dz) {
+    this.facing = [dx, dz];
     this.targetYaw = Math.atan2(dx, dz);
   }
 
@@ -83,6 +96,11 @@ export class Character {
       } else {
         this.path = [];
       }
+    }
+
+    if (!this.moving && !this.path.length && this.faceAfter) {
+      this.face(this.faceAfter[0] - this.gridX, this.faceAfter[1] - this.gridZ);
+      this.faceAfter = null;
     }
 
     let hop = 0, swing = 0;
@@ -99,7 +117,10 @@ export class Character {
         this.moving = null;
       }
     }
-    this.body.position.y = hop + (this.moving ? 0 : Math.sin(this.time * 3) * 0.01);
+    this.crouch = Math.max(0, this.crouch - dt * 2.5);
+    const bow = Math.sin(this.crouch * Math.PI);
+    this.body.position.y = hop + (this.moving ? 0 : Math.sin(this.time * 3) * 0.01) - bow * 0.08;
+    this.body.rotation.x = bow * 0.35;
     this.legL.rotation.x = swing;
     this.legR.rotation.x = -swing;
 
