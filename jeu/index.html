@@ -62,6 +62,10 @@
 
     body[data-mode="play"] .edit-only, body[data-mode="edit"] .play-only { display: none; }
 
+    #inventory { top: 12px; right: 12px; font-size: 16px; padding: 8px 14px; gap: 6px; }
+    #inventory b { min-width: 1.2em; text-align: right; }
+    #inventory.bump { animation: bump .35s ease-out; }
+    @keyframes bump { 40% { transform: scale(1.18); } }
     #toast {
       position: fixed; left: 50%; top: 72px; transform: translate(-50%, -8px);
       background: var(--panel); border: 1px solid var(--panel-border); border-radius: 999px;
@@ -131,11 +135,12 @@
     </div>
   </div>
 
+  <div id="inventory" class="panel play-only" title="Rondins : coupe des arbres (clic), construis des ponts (clic sur l'eau voisine)">🪵 <b>0</b></div>
   <div id="toast"></div>
   <div id="tooltip" hidden></div>
 
   <div id="help" class="panel">
-    <span class="play-only">clic : aller à la case · <kbd>Maj</kbd>+clic : lancer une graine · <kbd>F</kbd> recentrer · <kbd>Flèches</kbd>/<kbd>ZQSD</kbd> se déplacer · <kbd>Espace</kbd> planter devant soi ·</span>
+    <span class="play-only">clic : aller · clic sur un arbre : le couper · clic sur l'eau voisine : pont (1 🪵) · <kbd>Maj</kbd>+clic : lancer une graine · <kbd>F</kbd> recentrer · <kbd>Flèches</kbd>/<kbd>ZQSD</kbd> se déplacer · <kbd>Espace</kbd> planter devant soi ·</span>
     <span class="edit-only">clic gauche : peindre · <kbd>1</kbd>–<kbd>5</kbd> pinceau · <kbd>-</kbd>/<kbd>+</kbd> taille · <kbd>Ctrl+Z</kbd> annuler · clic droit : déplacer la vue · <kbd>F</kbd> recentrer ·</span>
     <span><kbd>G</kbd> grille · <kbd>E</kbd>/<kbd>R</kbd> pivoter · molette : zoom · <kbd>Tab</kbd> jouer/éditer</span>
   </div>

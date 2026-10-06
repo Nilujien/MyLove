@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { TILE } from './map.js';
 import { LAND_TOP, shared, cornerGrassiness, chamferedCorners, CHAMFER, CORNERS } from './terrain.js';
 
-const BLADES_PER_TILE = 48;
+const BLADES_PER_TILE = 22;
 
 // Brin d'herbe effilé : 2 segments, base en y=0, pointe en y=1.
 function bladeGeometry() {
@@ -79,18 +79,21 @@ export class GrassField {
     this.geometry = bladeGeometry();
     this.material = bladeMaterial();
     this.mesh = null;
+    this.ranges = new Map(); // "x,z" -> [début, nombre] dans l'InstancedMesh
   }
 
   rebuild(map) {
     const matrices = [], colors = [];
+    this.ranges.clear();
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
     const up = new THREE.Vector3(0, 1, 0);
     for (let z = 0; z < map.height; z++) for (let x = 0; x < map.width; x++) {
       const t = map.get(x, z);
-      if (t === TILE.WATER || map.hasTree(x, z)) continue;
+      if (t === TILE.WATER) continue;
       const g = [cornerGrassiness(map, x, z), cornerGrassiness(map, x, z + 1), cornerGrassiness(map, x + 1, z + 1), cornerGrassiness(map, x + 1, z)];
       if (t === TILE.DIRT && Math.max(...g) === 0) continue;
       const cut = chamferedCorners(map, x, z);
+      const start = matrices.length / 16;
       for (let i = 0; i < BLADES_PER_TILE; i++) {
         const u = 0.04 + rand(x, z, i, 1) * 0.92, v = 0.04 + rand(x, z, i, 2) * 0.92;
         // Pas de brins dans les coins arrondis.
@@ -103,20 +106,38 @@ export class GrassField {
         if (rand(x, z, i, 3) > density * 1.1 - 0.05) continue;
         const h = 0.08 + rand(x, z, i, 4) * 0.11;
         q.setFromAxisAngle(up, rand(x, z, i, 5) * Math.PI);
-        s.set(0.045 + rand(x, z, i, 6) * 0.03, h, 1);
+        s.set(0.05 + rand(x, z, i, 6) * 0.035, h, 1);
         p.set(x + u, LAND_TOP, z + v);
         m.compose(p, q, s);
-        matrices.push(m.clone());
-        colors.push(PALETTE[Math.floor(rand(x, z, i, 7) * PALETTE.length)]);
+        matrices.push(...m.elements);
+        PALETTE[Math.floor(rand(x, z, i, 7) * PALETTE.length)].toArray(colors, colors.length);
       }
+      const count = matrices.length / 16 - start;
+      if (count) this.ranges.set(`${x},${z}`, [start, count]);
     }
+    const n = matrices.length / 16;
     if (this.mesh) { this.scene.remove(this.mesh); this.mesh.dispose(); }
-    this.mesh = new THREE.InstancedMesh(this.geometry, this.material, Math.max(1, matrices.length));
-    this.mesh.count = matrices.length;
-    matrices.forEach((mat, i) => { this.mesh.setMatrixAt(i, mat); this.mesh.setColorAt(i, colors[i]); });
+    this.mesh = new THREE.InstancedMesh(this.geometry, this.material, Math.max(1, n));
+    this.mesh.count = n;
+    this.mesh.instanceMatrix.array.set(matrices);
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(colors.length ? colors : [1, 1, 1]), 3);
+    this.base = new Float32Array(matrices);
     this.mesh.receiveShadow = false;
     this.mesh.frustumCulled = false;
     this.mesh.raycast = () => {};
     this.scene.add(this.mesh);
+    for (const t of map.trees.values()) this.setTileHidden(t.x, t.z, true);
+  }
+
+  // Masque (arbre planté) ou restaure (arbre coupé) les brins d'une case, sans tout recalculer.
+  setTileHidden(x, z, hidden) {
+    const r = this.ranges.get(`${x},${z}`);
+    if (!r || !this.mesh) return;
+    const arr = this.mesh.instanceMatrix.array;
+    const [start, count] = r;
+    if (hidden) arr.fill(0, start * 16, (start + count) * 16);
+    else arr.set(this.base.subarray(start * 16, (start + count) * 16), start * 16);
+    this.mesh.instanceMatrix.addUpdateRange(start * 16, count * 16);
+    this.mesh.instanceMatrix.needsUpdate = true;
   }
 }

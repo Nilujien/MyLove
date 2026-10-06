@@ -8,11 +8,14 @@ import { Terrain, LAND_TOP, WATER_LEVEL, shared } from './terrain.js';
 import { Character } from './character.js';
 import { GrassField } from './grass.js';
 import { Motes } from './motes.js';
-import { Forest, GROW_TIME, stageOf } from './trees.js';
+import { Forest, GROW_TIME, stageOf, logsFor } from './trees.js';
+import { Bridges } from './bridges.js';
+import { PathPreview } from './path.js';
 import { Sparkles } from './sparkles.js';
 import { SeedThrower } from './seeds.js';
 
-const MAP_SIZE = 24;
+const MAP_SIZE = 48;
+const BRIDGE_COST = 1; // rondins par pont
 const STORAGE_KEY = 'iso-jeu-carte-v1';
 
 // ---------- Scène ----------
@@ -114,6 +117,7 @@ function gridDirFromScreen(sx, sy) {
 }
 
 // ---------- Monde ----------
+let savedLogs = 0;
 let map = loadMap() ?? GameMap.random(MAP_SIZE, MAP_SIZE);
 const terrain = new Terrain(scene);
 const grass = new GrassField(scene);
@@ -122,6 +126,9 @@ const hero = new Character(scene, 0, 0);
 const sparkles = new Sparkles(scene);
 const forest = new Forest(scene, sparkles);
 const seeds = new SeedThrower(scene, sparkles);
+const bridges = new Bridges(scene);
+const pathPreview = new PathPreview(scene);
+const inventory = { logs: savedLogs };
 
 // Post-traitement : halo lumineux (bloom) sur les reflets et les poussières de lumière.
 const composer = new EffectComposer(renderer);
@@ -134,6 +141,7 @@ function refreshWorld() {
   terrain.rebuild(map);
   grass.rebuild(map);
   forest.sync(map);
+  bridges.sync(map);
   buildGrid();
 }
 
@@ -160,14 +168,26 @@ function setMap(m, recenterHero = false) {
   map = m;
   refreshWorld();
   placeHeroSafely(recenterHero);
-  motes.setMapSize(map.width, map.height);
-  const cx = map.width / 2, cz = map.height / 2;
-  sun.position.set(cx + 14, 24, cz + 8);
-  sun.target.position.set(cx, 0, cz);
-  shared.uSunDir.value.copy(sun.position).sub(sun.target.position).normalize();
-  const s = sun.shadow.camera, r = Math.max(map.width, map.height) * 0.8;
-  s.left = -r; s.right = r; s.top = r; s.bottom = -r; s.near = 1; s.far = 80;
-  s.updateProjectionMatrix();
+}
+
+// Le soleil (et sa zone d'ombre) suit la vue : ombres nettes quelle que soit la taille de la carte.
+const SUN_OFFSET = new THREE.Vector3(14, 24, 8);
+shared.uSunDir.value.copy(SUN_OFFSET).normalize();
+let shadowRadius = 0;
+function updateSun() {
+  const r = THREE.MathUtils.clamp(16 / cam.zoom, 16, 48);
+  const texel = (2 * r) / sun.shadow.mapSize.x;
+  // Alignement sur les texels de l'ombre pour éviter le scintillement en déplacement.
+  const tx = Math.round(cam.target.x / texel) * texel, tz = Math.round(cam.target.z / texel) * texel;
+  sun.target.position.set(tx, 0, tz);
+  sun.position.copy(sun.target.position).add(SUN_OFFSET);
+  if (r !== shadowRadius) {
+    shadowRadius = r;
+    const s = sun.shadow.camera;
+    s.left = -r; s.right = r; s.top = r; s.bottom = -r; s.near = 1; s.far = 90;
+    s.updateProjectionMatrix();
+  }
+  motes.setCenter(cam.target.x, cam.target.z);
 }
 
 function placeHeroSafely(force = false) {
@@ -184,15 +204,26 @@ function placeHeroSafely(force = false) {
 }
 
 function saveMap() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ map: map.toJSON(), hero: [hero.gridX, hero.gridZ] })); } catch { /* stockage indisponible */ }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ map: map.toJSON(), hero: [hero.gridX, hero.gridZ], logs: inventory.logs }));
+  } catch { /* stockage indisponible */ }
 }
 function loadMap() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    const m = GameMap.fromJSON(data.map);
-    if (Array.isArray(data.hero)) queueMicrotask(() => { if (m.isWalkable(...data.hero)) hero.teleport(...data.hero); });
+    let m = GameMap.fromJSON(data.map);
+    let ox = 0, oz = 0;
+    // Les anciennes cartes, plus petites, sont agrandies : leur contenu est conservé au centre.
+    if (m.width < MAP_SIZE || m.height < MAP_SIZE) {
+      ({ map: m, ox, oz } = m.expanded(Math.max(MAP_SIZE, m.width), Math.max(MAP_SIZE, m.height)));
+    }
+    if (Number.isInteger(data.logs) && data.logs > 0) savedLogs = data.logs;
+    if (Array.isArray(data.hero)) {
+      const [hx, hz] = [data.hero[0] + ox, data.hero[1] + oz];
+      queueMicrotask(() => { if (m.isWalkable(hx, hz)) { hero.teleport(hx, hz); cam.target.set(hx + 0.5, LAND_TOP, hz + 0.5); } });
+    }
     return m;
   } catch { return null; }
 }
@@ -222,7 +253,7 @@ function pickCell(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObjects([terrain.landMesh, terrain.waterMesh, forest.group], true)
+  const hit = raycaster.intersectObjects([terrain.landMesh, terrain.waterMesh, forest.group, bridges.group], true)
     .find((h) => isShown(h.object)) ?? null;
   if (!hit) return null;
   for (let o = hit.object; o; o = o.parent) if (o.userData.cell) return o.userData.cell;
@@ -237,10 +268,10 @@ function updateCursor() {
   if (!hoverCell) return;
   const size = state.mode === 'edit' && state.brush !== 'hero' ? state.brushSize : 1;
   const [x, z] = hoverCell;
-  const y = map.isLand(x, z) ? LAND_TOP : WATER_LEVEL;
+  const y = map.isLand(x, z) || map.hasBridge(x, z) ? LAND_TOP : WATER_LEVEL;
   cursor.position.set(x + 0.5, y + 0.02, z + 0.5);
   cursor.scale.set(size, 1, size);
-  const ok = state.mode === 'edit' || (state.shift ? throwTargetError(x, z) === null : map.isWalkable(x, z));
+  const ok = state.mode === 'edit' || (state.shift ? throwTargetError(x, z) === null : clickTargetOk(x, z));
   cursor.material.color.set(ok ? 0xffffff : 0xff6b6b);
   cursorFill.material.color.set(ok ? 0xffffff : 0xff6b6b);
 }
@@ -284,10 +315,11 @@ function paint(cell) {
     if (state.brush === TILE.WATER && onHero) continue;
     // Les pinceaux de terrain effacent les arbres.
     if (map.removeTree(x, z)) treesChanged = true;
+    if (map.removeBridge(x, z)) treesChanged = true;
     changed = map.set(x, z, state.brush) || changed;
   }
   if (changed) refreshWorld();
-  else if (treesChanged) { forest.sync(map); grass.rebuild(map); }
+  else if (treesChanged) { forest.sync(map); bridges.sync(map); grass.rebuild(map); }
 }
 
 // Plante une graine sur la case devant le personnage.
@@ -299,7 +331,7 @@ function plantInFront() {
   }
   map.plant(x, z);
   forest.sync(map);
-  grass.rebuild(map);
+  grass.setTileHidden(x, z, true);
   hero.playPlant();
   sparkles.burst(x + 0.5, LAND_TOP + 0.05, z + 0.5, 24, { spread: 0.4, up: 0.8, life: 1, size: 8 });
   saveMap();
@@ -322,11 +354,16 @@ function throwSeed([x, z]) {
   hero.lookAt(x + 0.5 - from.x, z + 0.5 - from.z);
   hero.playPlant();
   from.y += 0.55;
-  const to = new THREE.Vector3(x + 0.5, (map.isLand(x, z) ? LAND_TOP : WATER_LEVEL) + 0.04, z + 0.5);
+  const to = new THREE.Vector3(x + 0.5, (map.isLand(x, z) || map.hasBridge(x, z) ? LAND_TOP : WATER_LEVEL) + 0.04, z + 0.5);
   seeds.throw(from, to, () => landSeed(x, z, to));
 }
 
 function landSeed(x, z, at) {
+  if (map.hasBridge(x, z)) {
+    sparkles.burst(at.x, LAND_TOP + 0.1, at.z, 10, { spread: 0.2, up: 0.6, life: 0.6, size: 6 });
+    toast('La graine a rebondi sur le pont');
+    return;
+  }
   if (!map.isLand(x, z)) {
     sparkles.burst(at.x, at.y, at.z, 26, { spread: 0.35, up: 1.3, life: 0.8, size: 8, colors: sparkles.waterColors });
     toast('💧 Plouf ! La graine a coulé');
@@ -340,19 +377,104 @@ function landSeed(x, z, at) {
   }
   map.plant(x, z);
   forest.sync(map);
-  grass.rebuild(map);
+  grass.setTileHidden(x, z, true);
   sparkles.burst(at.x, at.y, at.z, 24, { spread: 0.4, up: 0.8, life: 1, size: 8 });
   saveMap();
   toast('🌱 Graine plantée');
+}
+
+// ---------- Clic en mode jeu : se déplacer, couper un arbre, construire un pont ----------
+function heroCell() {
+  return hero.moving ? [hero.moving.toX, hero.moving.toZ] : [hero.gridX, hero.gridZ];
+}
+const isAdjacent = ([ax, az], [bx, bz]) => Math.abs(ax - bx) + Math.abs(az - bz) === 1;
+const isOpenWater = (x, z) => map.get(x, z) === TILE.WATER && !map.hasBridge(x, z);
+
+function clickTargetOk(x, z) {
+  if (map.hasTree(x, z)) return true;
+  if (isOpenWater(x, z)) return inventory.logs >= BRIDGE_COST && isAdjacent(heroCell(), [x, z]);
+  return map.isWalkable(x, z);
+}
+
+function playClick(cell) {
+  const [x, z] = cell;
+  if (map.hasTree(x, z)) { goNextTo(cell, () => chopTree(cell)); return; }
+  if (isOpenWater(x, z)) {
+    if (!isAdjacent(heroCell(), cell)) { toast('Approche-toi : un pont se construit sur une case d\'eau voisine'); return; }
+    if (hero.moving) hero.setPath([], { face: cell, action: () => buildBridge(cell) });
+    else buildBridge(cell);
+    return;
+  }
+  const [fx, fz] = heroCell();
+  const path = map.findPath(fx, fz, x, z);
+  if (path) hero.setPath(path, { show: true });
+  else toast('Pas de chemin jusque-là');
+}
+
+// Va sur la case voisine la plus proche de « cell », s'y tourne vers elle puis lance l'action.
+function goNextTo(cell, action) {
+  const here = heroCell();
+  if (isAdjacent(here, cell) && !hero.moving) {
+    hero.face(cell[0] - here[0], cell[1] - here[1]);
+    action();
+    return;
+  }
+  let best = null;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nx = cell[0] + dx, nz = cell[1] + dz;
+    const p = nx === here[0] && nz === here[1] ? [] : map.findPath(here[0], here[1], nx, nz);
+    if (p && (!best || p.length < best.length)) best = p;
+  }
+  if (!best) { toast('Impossible d\'atteindre cet arbre'); return; }
+  hero.setPath(best, { face: cell, action, show: best.length > 0 });
+}
+
+function chopTree([x, z]) {
+  const tree = forest.get(x, z);
+  if (!tree || !isAdjacent([hero.gridX, hero.gridZ], [x, z])) return;
+  const n = logsFor(tree.growth());
+  if (!n) { toast('🌱 Trop jeune pour être coupé'); return; }
+  map.removeTree(x, z);
+  forest.fell(x, z, x - hero.gridX, z - hero.gridZ);
+  grass.setTileHidden(x, z, false);
+  hero.playPlant();
+  addLogs(n);
+  saveMap();
+  toast(`🪓 +${n} rondin${n > 1 ? 's' : ''}`);
+}
+
+function buildBridge([x, z]) {
+  if (!isAdjacent([hero.gridX, hero.gridZ], [x, z]) || !isOpenWater(x, z)) return;
+  if (inventory.logs < BRIDGE_COST) { toast('🪵 Il faut un rondin pour construire un pont : coupe un arbre'); return; }
+  const dx = x - hero.gridX, dz = z - hero.gridZ;
+  map.buildBridge(x, z, dx !== 0 ? 'x' : 'z');
+  bridges.sync(map, `${x},${z}`);
+  hero.face(dx, dz);
+  hero.playPlant();
+  addLogs(-BRIDGE_COST);
+  sparkles.burst(x + 0.5, LAND_TOP, z + 0.5, 30, { spread: 0.6, up: 0.7, life: 1, size: 8, colors: sparkles.woodColors });
+  saveMap();
+  toast('🌉 Pont construit');
+}
+
+function addLogs(n) {
+  inventory.logs = Math.max(0, inventory.logs + n);
+  const el = document.getElementById('inventory');
+  el.querySelector('b').textContent = inventory.logs;
+  el.classList.remove('bump');
+  void el.offsetWidth;
+  el.classList.add('bump');
 }
 
 function describeTree(x, z) {
   const tree = forest.get(x, z);
   if (!tree) return '';
   const g = tree.growth();
-  if (g >= 1) return `🌸 ${stageOf(g).name}`;
+  const n = logsFor(g);
+  const hint = n ? ` · clic : couper (${n} 🪵)` : ' · trop jeune pour être coupé';
+  if (g >= 1) return `🌸 ${stageOf(g).name}${hint}`;
   const left = Math.ceil((1 - g) * GROW_TIME);
-  return `🌳 ${stageOf(g).name} · ${Math.floor(g * 100)} % (encore ${left} s)`;
+  return `🌳 ${stageOf(g).name} · ${Math.floor(g * 100)} % (encore ${left} s)${hint}`;
 }
 
 let toastTimer = 0;
@@ -396,22 +518,7 @@ canvas.addEventListener('pointerdown', (e) => {
   } else {
     // Déplacement au clic : la caméra reste fixe (les flèches ou F la recentrent).
     cam.follow = false;
-    const fromX = hero.moving ? hero.moving.toX : hero.gridX;
-    const fromZ = hero.moving ? hero.moving.toZ : hero.gridZ;
-    if (map.hasTree(...cell)) {
-      // Clic sur un arbre : aller à côté et se tourner vers lui.
-      let best = null;
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nx = cell[0] + dx, nz = cell[1] + dz;
-        const p = nx === fromX && nz === fromZ ? [] : map.findPath(fromX, fromZ, nx, nz);
-        if (p && (!best || p.length < best.length)) best = p;
-      }
-      if (best) { hero.setPath(best); hero.faceAfter = cell; }
-      toast(describeTree(...cell));
-      return;
-    }
-    const path = map.findPath(fromX, fromZ, cell[0], cell[1]);
-    if (path) { hero.setPath(path); hero.faceAfter = null; }
+    playClick(cell);
   }
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -567,6 +674,7 @@ ui.file.addEventListener('change', async () => {
 
 // ---------- Boucle ----------
 setMap(map, true);
+document.querySelector('#inventory b').textContent = inventory.logs;
 setBrush(TILE.GRASS, false);
 setBrushSize(1);
 setMode('play');
@@ -590,14 +698,17 @@ renderer.setAnimationLoop(() => {
   hero.update(dt, map);
   shared.uHero.value.copy(hero.root.position);
   terrain.update(dt);
-  forest.update();
+  forest.update(dt);
+  bridges.update(dt);
+  pathPreview.update(dt, hero, shared.uTime.value);
   seeds.update(dt);
   sparkles.update(dt);
   if (hoverCell && map.hasTree(...hoverCell)) updateTooltip();
   updateCamera(dt);
+  updateSun();
   updateCursor();
   composer.render(dt);
 });
 
 // Accès de débogage depuis la console.
-window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront, throwSeed };
+window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront, throwSeed, click: playClick, inventory };

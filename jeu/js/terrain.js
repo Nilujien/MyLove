@@ -10,7 +10,7 @@ const BASE = -1;
 const LIP = 0.08; // épaisseur de la couche d'herbe visible sur les falaises
 const CHAMFER = 0.3; // arrondi des coins extérieurs
 const INNER = 0.55; // taille du cœur uni de chaque tuile
-const WATER_RES = 4; // sommets d'eau par tuile
+const WATER_RES = 3; // sommets d'eau par tuile
 const SHORE_MAX = 3; // distance (en tuiles) au-delà de laquelle l'eau est « profonde »
 
 // Types de surface, transmis au shader du terrain.
@@ -337,17 +337,21 @@ export class Terrain {
   computeShore(map) {
     const pos = this.waterMesh.geometry.getAttribute('position');
     const shore = this.waterMesh.geometry.getAttribute('shore');
-    const R = SHORE_MAX;
+    const R = SHORE_MAX, W = map.width, H = map.height;
+    const land = new Uint8Array(W * H);
+    for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) land[z * W + x] = map.isLand(x, z) ? 1 : 0;
     for (let i = 0; i < pos.count; i++) {
       const px = pos.getX(i), pz = pos.getZ(i);
       const bx = Math.floor(px), bz = Math.floor(pz);
       let best = R * R;
-      for (let z = bz - R; z <= bz + R; z++) {
-        for (let x = bx - R; x <= bx + R; x++) {
-          if (!map.isLand(x, z)) continue;
+      for (let z = Math.max(0, bz - R); z <= Math.min(H - 1, bz + R); z++) {
+        const dz = Math.max(z - pz, 0, pz - (z + 1));
+        if (dz * dz >= best) continue;
+        for (let x = Math.max(0, bx - R); x <= Math.min(W - 1, bx + R); x++) {
+          if (!land[z * W + x]) continue;
           const dx = Math.max(x - px, 0, px - (x + 1));
-          const dz = Math.max(z - pz, 0, pz - (z + 1));
-          best = Math.min(best, dx * dx + dz * dz);
+          const d = dx * dx + dz * dz;
+          if (d < best) best = d;
         }
       }
       shore.setX(i, Math.sqrt(best));

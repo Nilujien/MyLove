@@ -8,6 +8,7 @@ export class GameMap {
     this.height = height;
     this.tiles = new Uint8Array(width * height).fill(fill);
     this.trees = new Map(); // "x,z" -> { x, z, plantedAt } (horodatage en ms)
+    this.bridges = new Map(); // "x,z" -> { x, z, axis } (axis : 'x' ou 'z', sens de la traversée)
   }
 
   inBounds(x, z) {
@@ -32,8 +33,20 @@ export class GameMap {
   }
 
   isWalkable(x, z) {
-    return this.isLand(x, z) && !this.hasTree(x, z);
+    return (this.isLand(x, z) && !this.hasTree(x, z)) || this.hasBridge(x, z);
   }
+
+  hasBridge(x, z) { return this.bridges.has(`${x},${z}`); }
+
+  canBuildBridge(x, z) { return this.get(x, z) === TILE.WATER && !this.hasBridge(x, z); }
+
+  buildBridge(x, z, axis) {
+    if (!this.canBuildBridge(x, z)) return false;
+    this.bridges.set(`${x},${z}`, { x, z, axis });
+    return true;
+  }
+
+  removeBridge(x, z) { return this.bridges.delete(`${x},${z}`); }
 
   hasTree(x, z) { return this.trees.has(`${x},${z}`); }
 
@@ -77,8 +90,9 @@ export class GameMap {
 
   toJSON() {
     return {
-      version: 2, width: this.width, height: this.height, tiles: Array.from(this.tiles),
+      version: 3, width: this.width, height: this.height, tiles: Array.from(this.tiles),
       trees: [...this.trees.values()].map(({ x, z, plantedAt }) => [x, z, plantedAt]),
+      bridges: [...this.bridges.values()].map(({ x, z, axis }) => [x, z, axis]),
     };
   }
 
@@ -95,7 +109,21 @@ export class GameMap {
       const [x, z, plantedAt] = tree;
       if (Number.isInteger(x) && Number.isInteger(z) && Number.isFinite(plantedAt)) map.plant(x, z, plantedAt);
     }
+    for (const bridge of Array.isArray(data.bridges) ? data.bridges : []) {
+      const [x, z, axis] = bridge;
+      if (Number.isInteger(x) && Number.isInteger(z)) map.buildBridge(x, z, axis === 'x' ? 'x' : 'z');
+    }
     return map;
+  }
+
+  // Copie agrandie, contenu centré ; renvoie aussi le décalage appliqué.
+  expanded(width, height, fill = TILE.GRASS) {
+    const ox = Math.floor((width - this.width) / 2), oz = Math.floor((height - this.height) / 2);
+    const m = new GameMap(width, height, fill);
+    for (let z = 0; z < this.height; z++) for (let x = 0; x < this.width; x++) m.set(x + ox, z + oz, this.get(x, z));
+    for (const t of this.trees.values()) m.plant(t.x + ox, t.z + oz, t.plantedAt);
+    for (const b of this.bridges.values()) m.buildBridge(b.x + ox, b.z + oz, b.axis);
+    return { map: m, ox, oz };
   }
 
   // Génère des îles avec un bruit de valeur lissé.
