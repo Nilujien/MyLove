@@ -189,8 +189,8 @@
       to { transform: translateY(-115dvh) rotate(30deg); opacity: 0; }
     }
 
-    /* ---------- Les petits chats ---------- */
-    .cats {
+    /* ---------- Les petits cœurs qui marchent ---------- */
+    .walkers {
       position: fixed;
       inset: 0;
       pointer-events: none;
@@ -198,71 +198,66 @@
       overflow: hidden;
     }
 
-    .cat {
+    .walker {
       position: absolute;
       left: 0;
-      width: var(--size, 80px);
+      width: var(--size, 70px);
       animation: walk var(--speed, 18s) linear infinite;
       animation-delay: var(--delay, 0s);
     }
 
-    .cat.reverse { animation-name: walk-back; }
+    .walker.reverse { animation-name: walk-back; }
 
-    .cat svg {
+    .walker svg {
       display: block;
       width: 100%;
       overflow: visible;
-      animation: trot 0.5s ease-in-out infinite;
+      animation: hop 0.5s ease-in-out infinite;
     }
 
-    .cat.reverse svg { transform: scaleX(-1); animation-name: trot-back; }
-
     @keyframes walk {
-      from { transform: translateX(calc(-1 * var(--size, 80px) - 20px)); }
+      from { transform: translateX(calc(-1 * var(--size, 70px) - 20px)); }
       to   { transform: translateX(calc(100vw + 20px)); }
     }
     @keyframes walk-back {
       from { transform: translateX(calc(100vw + 20px)); }
-      to   { transform: translateX(calc(-1 * var(--size, 80px) - 20px)); }
+      to   { transform: translateX(calc(-1 * var(--size, 70px) - 20px)); }
     }
-    @keyframes trot {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-2px); }
-    }
-    @keyframes trot-back {
-      0%, 100% { transform: scaleX(-1) translateY(0); }
-      50% { transform: scaleX(-1) translateY(-2px); }
+    @keyframes hop {
+      0%, 100% { transform: translateY(0) rotate(-3deg); }
+      50% { transform: translateY(-3px) rotate(3deg); }
     }
 
-    .cat .leg {
+    .walker .leg {
       transform-box: fill-box;
       transform-origin: 50% 0;
       animation: step 0.5s ease-in-out infinite alternate;
     }
-    .cat .leg.b { animation-delay: -0.5s; }
+    .walker .leg.b { animation-delay: -0.5s; }
 
     @keyframes step {
-      from { transform: rotate(22deg); }
-      to   { transform: rotate(-22deg); }
+      from { transform: rotate(24deg); }
+      to   { transform: rotate(-24deg); }
     }
 
-    .cat .tail {
+    .walker .arm {
       transform-box: fill-box;
-      transform-origin: 100% 100%;
-      animation: wag 1.2s ease-in-out infinite alternate;
+      animation: swing 0.5s ease-in-out infinite alternate;
+    }
+    .walker .arm.left { transform-origin: 100% 0; }
+    .walker .arm.right { transform-origin: 0 0; animation-delay: -0.5s; }
+
+    @keyframes swing {
+      from { transform: rotate(-28deg); }
+      to   { transform: rotate(28deg); }
     }
 
-    @keyframes wag {
-      from { transform: rotate(-12deg); }
-      to   { transform: rotate(14deg); }
-    }
-
-    .cat .floor-shadow { opacity: 0.25; }
+    .walker .floor-shadow { opacity: 0.25; }
 
     @media (prefers-reduced-motion: reduce) {
-      .emoji, #yes, .cat, .cat svg, .cat .leg, .cat .tail { animation: none; }
+      .emoji, #yes, .walker, .walker svg, .walker .leg, .walker .arm { animation: none; }
       #no.escaping { transition: none; }
-      .cat { display: none; }
+      .walker { display: none; }
     }
   </style>
 </head>
@@ -270,30 +265,44 @@
   <div class="stars"></div>
   <div class="moon">🌙</div>
 
-  <!-- Modèle de chat (côté, tourné vers la droite) -->
-  <template id="cat-template">
-    <div class="cat">
-      <svg viewBox="0 0 64 44" aria-hidden="true">
-        <ellipse class="floor-shadow" cx="30" cy="42" rx="20" ry="2" fill="#000"/>
-        <path class="tail" d="M14 22 C 6 20, 4 10, 9 4" stroke="var(--fur)" stroke-width="4" fill="none" stroke-linecap="round"/>
-        <rect class="leg a" x="15" y="26" width="4" height="14" rx="2" fill="var(--fur-dark)"/>
-        <rect class="leg b" x="37" y="26" width="4" height="14" rx="2" fill="var(--fur-dark)"/>
-        <ellipse cx="29" cy="24" rx="17" ry="9" fill="var(--fur)"/>
-        <rect class="leg b" x="19" y="27" width="4" height="13" rx="2" fill="var(--fur)"/>
-        <rect class="leg a" x="41" y="27" width="4" height="13" rx="2" fill="var(--fur)"/>
-        <polygon points="42,12 44,1 50,9" fill="var(--fur)"/>
-        <polygon points="51,9 57,1 58,13" fill="var(--fur)"/>
-        <polygon points="44.5,10 45,5 48,9" fill="#ffb3c8"/>
-        <polygon points="53,9 56,5 56.5,11" fill="#ffb3c8"/>
-        <circle cx="50" cy="16" r="9" fill="var(--fur)"/>
-        <ellipse cx="53" cy="15" rx="1.4" ry="2" fill="#1b1020"/>
-        <ellipse cx="47.5" cy="15" rx="1.4" ry="2" fill="#1b1020"/>
-        <path d="M49.5 19 l1.3 1.2 l1.3 -1.2 z" fill="#ff7aa5"/>
-        <path d="M54 20 h7 M54 21.5 l6 1.5 M47 20 h-7 M47 21.5 l-6 1.5" stroke="#fff" stroke-opacity=".6" stroke-width=".5"/>
+  <!-- Modèle de petit cœur avec des bras et des jambes -->
+  <template id="walker-template">
+    <div class="walker">
+      <svg viewBox="-10 0 80 70" aria-hidden="true">
+        <ellipse class="floor-shadow" cx="30" cy="68" rx="18" ry="2" fill="#000"/>
+        <!-- Jambes -->
+        <g class="leg a">
+          <path d="M24 44 L24 64" stroke="var(--limb)" stroke-width="3.5" stroke-linecap="round"/>
+          <ellipse cx="21.5" cy="65" rx="4.5" ry="2.5" fill="var(--limb)"/>
+        </g>
+        <g class="leg b">
+          <path d="M36 44 L36 64" stroke="var(--limb)" stroke-width="3.5" stroke-linecap="round"/>
+          <ellipse cx="38.5" cy="65" rx="4.5" ry="2.5" fill="var(--limb)"/>
+        </g>
+        <!-- Bras -->
+        <g class="arm left">
+          <path d="M6 26 L-4 38" stroke="var(--limb)" stroke-width="3.5" stroke-linecap="round"/>
+          <circle cx="-4.5" cy="39" r="3.2" fill="var(--limb)"/>
+        </g>
+        <g class="arm right">
+          <path d="M54 26 L64 38" stroke="var(--limb)" stroke-width="3.5" stroke-linecap="round"/>
+          <circle cx="64.5" cy="39" r="3.2" fill="var(--limb)"/>
+        </g>
+        <!-- Corps en forme de cœur -->
+        <path d="M30 52 C 10 38, 2 28, 2 17 C 2 8, 9 2, 17 2 C 23 2, 27 5, 30 10 C 33 5, 37 2, 43 2 C 51 2, 58 8, 58 17 C 58 28, 50 38, 30 52 Z" fill="var(--heart)"/>
+        <ellipse cx="14" cy="12" rx="5" ry="3" transform="rotate(-30 14 12)" fill="#fff" opacity=".35"/>
+        <!-- Visage -->
+        <circle cx="22" cy="22" r="2.6" fill="#2a1020"/>
+        <circle cx="38" cy="22" r="2.6" fill="#2a1020"/>
+        <circle cx="22.8" cy="21.2" r=".9" fill="#fff"/>
+        <circle cx="38.8" cy="21.2" r=".9" fill="#fff"/>
+        <ellipse cx="17" cy="28" rx="3.2" ry="2" fill="#fff" opacity=".35"/>
+        <ellipse cx="43" cy="28" rx="3.2" ry="2" fill="#fff" opacity=".35"/>
+        <path d="M25.5 28.5 Q30 33.5 34.5 28.5" stroke="#2a1020" stroke-width="2" fill="none" stroke-linecap="round"/>
       </svg>
     </div>
   </template>
-  <div class="cats" id="cats"></div>
+  <div class="walkers" id="walkers"></div>
 
   <main class="screen question">
     <div class="emoji">🍿</div>
@@ -325,36 +334,29 @@
 
       function rand(min, max) { return min + Math.random() * (max - min); }
 
-      /* ---------- Les chats qui se promènent ---------- */
-      var catColors = [
-        ['#f2a65a', '#d9873b'], // roux
-        ['#9aa0b5', '#7b8197'], // gris
-        ['#3a3045', '#2a2233'], // noir
-        ['#f3e3cf', '#d8c3a8'], // crème
-        ['#c98b5e', '#a86f45']  // tigré clair
+      /* ---------- Les petits cœurs qui se promènent ---------- */
+      var heartColors = ['#ff4f8b', '#ff6b6b', '#ff9ec4', '#e0457b', '#ffb3c8'];
+      var lanes = [
+        // position verticale, taille, durée de traversée, sens inverse ?, décalage de départ
+        { bottom: 'calc(10px + env(safe-area-inset-bottom))', size: 72, speed: 16, reverse: false, delay: -3 },
+        { bottom: 'calc(12px + env(safe-area-inset-bottom))', size: 58, speed: 22, reverse: true,  delay: -12 },
+        { bottom: 'calc(78px + env(safe-area-inset-bottom))', size: 46, speed: 26, reverse: false, delay: -18 },
+        { bottom: 'calc(80px + env(safe-area-inset-bottom))', size: 42, speed: 30, reverse: true,  delay: -6 },
+        { top: 'max(10px, env(safe-area-inset-top))',         size: 40, speed: 28, reverse: false, delay: -9 }
       ];
-      var catLanes = [
-        // [position verticale (bas de l'écran), taille, durée, sens inverse ?]
-        { bottom: 'calc(10px + env(safe-area-inset-bottom))', size: 86, speed: 16, reverse: false, delay: -3 },
-        { bottom: 'calc(14px + env(safe-area-inset-bottom))', size: 64, speed: 22, reverse: true,  delay: -12 },
-        { bottom: 'calc(58px + env(safe-area-inset-bottom))', size: 54, speed: 26, reverse: false, delay: -18 },
-        { bottom: 'calc(62px + env(safe-area-inset-bottom))', size: 48, speed: 30, reverse: true,  delay: -6 },
-        { top: 'max(12px, env(safe-area-inset-top))',         size: 44, speed: 28, reverse: false, delay: -9 }
-      ];
-      var tpl = document.getElementById('cat-template');
-      var catsBox = document.getElementById('cats');
-      catLanes.forEach(function (lane, i) {
-        var cat = tpl.content.firstElementChild.cloneNode(true);
-        var c = catColors[i % catColors.length];
-        cat.style.setProperty('--fur', c[0]);
-        cat.style.setProperty('--fur-dark', c[1]);
-        cat.style.setProperty('--size', lane.size + 'px');
-        cat.style.setProperty('--speed', lane.speed + 's');
-        cat.style.setProperty('--delay', lane.delay + 's');
-        if (lane.bottom) cat.style.bottom = lane.bottom;
-        if (lane.top) cat.style.top = lane.top;
-        if (lane.reverse) cat.classList.add('reverse');
-        catsBox.appendChild(cat);
+      var tpl = document.getElementById('walker-template');
+      var walkersBox = document.getElementById('walkers');
+      lanes.forEach(function (lane, i) {
+        var w = tpl.content.firstElementChild.cloneNode(true);
+        w.style.setProperty('--heart', heartColors[i % heartColors.length]);
+        w.style.setProperty('--limb', '#ffd6e4');
+        w.style.setProperty('--size', lane.size + 'px');
+        w.style.setProperty('--speed', lane.speed + 's');
+        w.style.setProperty('--delay', lane.delay + 's');
+        if (lane.bottom) w.style.bottom = lane.bottom;
+        if (lane.top) w.style.top = lane.top;
+        if (lane.reverse) w.classList.add('reverse');
+        walkersBox.appendChild(w);
       });
 
       /* ---------- Le bouton qui s'échappe ---------- */
@@ -363,7 +365,7 @@
         "Raté ! 😜",
         "Tu es sûr(e) ?",
         "Ce choix n'est pas disponible ce soir.",
-        "Même les chats disent oui 🐱",
+        "Même les petits cœurs disent oui 💗",
         "Essaie plutôt l'autre bouton 👀",
         "Erreur 404 : refus introuvable.",
         "Allez… dis oui 🥺"
@@ -440,7 +442,7 @@
 
       /* ---------- Réponse "Oui" ---------- */
       function hearts() {
-        var symbols = ['💖', '💕', '🍿', '🎬', '💘', '✨', '🐱'];
+        var symbols = ['💖', '💕', '🍿', '🎬', '💘', '✨', '💗'];
         for (var i = 0; i < 32; i++) {
           var s = document.createElement('span');
           s.className = 'heart';
