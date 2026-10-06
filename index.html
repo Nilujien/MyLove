@@ -315,8 +315,8 @@
 
   <script>
     (function () {
-      // Adresse qui reçoit la bonne nouvelle
-      var EMAIL = 'julien.cua@gmail.com';
+      // Identifiant FormSubmit (remplace l'adresse mail, qui reste ainsi cachée)
+      var FORMSUBMIT_ID = '8cd326e00fd02e1d1ea7300aae2064be';
 
       var yes = document.getElementById('yes');
       var no = document.getElementById('no');
@@ -453,17 +453,11 @@
         }
       }
 
-      function mailtoLink() {
-        return 'mailto:' + EMAIL +
-          '?subject=' + encodeURIComponent('Oui pour le film ce soir 💖') +
-          '&body=' + encodeURIComponent("C'est oui ! On fait semblant de regarder un film ce soir 🍿");
-      }
-
       // Envoi du mail via FormSubmit (fonctionne sans serveur, idéal pour GitHub Pages)
       function sendMail() {
         mailStatus.textContent = 'Envoi de la bonne nouvelle… 💌';
         var now = new Date();
-        fetch('https://formsubmit.co/ajax/' + EMAIL, {
+        fetch('https://formsubmit.co/ajax/' + FORMSUBMIT_ID, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify({
@@ -487,8 +481,9 @@
           .catch(function () {
             mailStatus.innerHTML = '';
             var a = document.createElement('a');
-            a.href = mailtoLink();
-            a.textContent = 'Clique ici pour me prévenir par mail 💌';
+            a.href = '#';
+            a.textContent = "Oups, le message n'est pas parti. Réessayer 💌";
+            a.addEventListener('click', function (e) { e.preventDefault(); sendMail(); });
             mailStatus.appendChild(a);
           });
       }
