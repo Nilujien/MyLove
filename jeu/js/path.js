@@ -23,40 +23,77 @@ export class PathPreview {
     scene.add(this.dots, this.ring);
     this.m = new THREE.Matrix4();
     this.alpha = 0;
+    this.idle = true; // rien d'affiché : aucune mise à jour
+    // Dernier état dessiné (pour ne reconstruire les points que s'il change).
+    this.lastPath = null; this.lastLen = -1; this.lastFirst = null; this.lastMoving = null;
+    this.lastLX = 0; this.lastLZ = 0;
+  }
+
+  // Ajoute un point (au plus MAX_DOTS) ; renvoie le nouveau nombre de points.
+  put(n, x, y, z, r) {
+    if (n >= MAX_DOTS) return n;
+    this.m.makeScale(r, 1, r).setPosition(x, y, z);
+    this.dots.setMatrixAt(n, this.m);
+    return n + 1;
+  }
+
+  // Reconstruit les points du chemin ; renvoie le nombre de cases (0 si aucun chemin).
+  rebuild(hero) {
+    const y = LAND_TOP + 0.025;
+    const path = hero.path, mv = hero.moving;
+    const total = hero.showPath ? path.length + (mv ? 1 : 0) : 0;
+    const hp = hero.root.position;
+    let px = hp.x, pz = hp.z, n = 0;
+    for (let i = 0; i < total; i++) {
+      let cx, cz;
+      if (mv && i === 0) { cx = mv.toX; cz = mv.toZ; } else { const c = path[mv ? i - 1 : i]; cx = c[0]; cz = c[1]; }
+      const x = cx + 0.5, z = cz + 0.5;
+      // Point intermédiaire, puis point de case (sauf la dernière, marquée par l'anneau).
+      if (Math.hypot(x - px, z - pz) > 0.6) n = this.put(n, (x + px) / 2, y, (z + pz) / 2, 0.028);
+      if (i < total - 1) n = this.put(n, x, y, z, 0.045);
+      px = x; pz = z;
+      if (i === total - 1) { this.lastLX = cx; this.lastLZ = cz; }
+    }
+    this.dots.count = n;
+    if (n) {
+      const im = this.dots.instanceMatrix;
+      im.clearUpdateRanges();
+      im.addUpdateRange(0, n * 16);
+      im.needsUpdate = true;
+    }
+    return total;
   }
 
   update(dt, hero, t) {
-    const cells = [];
-    if (hero.showPath) {
-      if (hero.moving) cells.push([hero.moving.toX, hero.moving.toZ]);
-      cells.push(...hero.path);
+    const path = hero.path, mv = hero.moving;
+    const has = hero.showPath && (path.length > 0 || !!mv);
+    if (!has && this.alpha < 0.01) {
+      // Rien à montrer : on coupe tout une seule fois.
+      if (!this.idle) {
+        this.idle = true;
+        this.alpha = 0;
+        this.dots.count = 0;
+        this.dots.visible = this.ring.visible = false;
+        this.lastPath = null;
+      }
+      return;
+    }
+    this.idle = false;
+    this.dots.visible = true;
+    // Points à refaire si le chemin ou la case visée change, ou à chaque image pendant un pas
+    // (le premier point intermédiaire suit la position du personnage).
+    const changed = path !== this.lastPath || path.length !== this.lastLen || path[0] !== this.lastFirst || mv !== this.lastMoving;
+    let cells = has ? 1 : 0;
+    if (changed || mv) {
+      this.lastPath = path; this.lastLen = path.length; this.lastFirst = path[0]; this.lastMoving = mv;
+      cells = this.rebuild(hero);
     }
     // Fondu d'apparition / disparition.
-    this.alpha += ((cells.length ? 1 : 0) - this.alpha) * Math.min(1, dt * 8);
+    this.alpha += ((cells ? 1 : 0) - this.alpha) * Math.min(1, dt * 8);
     const y = LAND_TOP + 0.025;
-    let n = 0;
-    const put = (x, z, r) => {
-      if (n >= MAX_DOTS) return;
-      this.m.makeScale(r, 1, r).setPosition(x, y, z);
-      this.dots.setMatrixAt(n++, this.m);
-    };
-    const hp = hero.root.position;
-    let px = hp.x, pz = hp.z;
-    cells.forEach(([cx, cz], i) => {
-      const x = cx + 0.5, z = cz + 0.5;
-      // Point intermédiaire, puis point de case (sauf la dernière, marquée par l'anneau).
-      if (Math.hypot(x - px, z - pz) > 0.6) put((x + px) / 2, (z + pz) / 2, 0.028);
-      if (i < cells.length - 1) put(x, z, 0.045);
-      px = x; pz = z;
-    });
-    this.dots.count = n;
-    this.dots.instanceMatrix.needsUpdate = true;
     const pulse = 0.5 + 0.5 * Math.sin(t * 4);
     this.material.opacity = (0.32 + 0.12 * pulse) * this.alpha;
-    if (cells.length) {
-      const [lx, lz] = cells[cells.length - 1];
-      this.ring.position.set(lx + 0.5, y, lz + 0.5);
-    }
+    if (cells) this.ring.position.set(this.lastLX + 0.5, y, this.lastLZ + 0.5);
     this.ring.visible = this.alpha > 0.02;
     this.ring.scale.setScalar(0.9 + 0.15 * pulse);
     this.ring.material.opacity = (0.4 + 0.2 * pulse) * this.alpha;
