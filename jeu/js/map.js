@@ -10,17 +10,26 @@ export class GameMap {
     this.trees = new Map(); // "x,z" -> { x, z, plantedAt } (horodatage en ms)
     this.bridges = new Map(); // "x,z" -> { x, z, axis } (axis : 'x' ou 'z', sens de la traversée)
     this.bushes = new Map(); // "x,z" -> { x, z, bornAt, variant } (buissons de lisière, traversables)
+    // Grilles d'occupation (1 octet par case), tenues à jour avec les Maps : tests rapides sans chaîne.
+    this.treeGrid = new Uint8Array(width * height);
+    this.bushGrid = new Uint8Array(width * height);
+    this.bridgeGrid = new Uint8Array(width * height);
   }
 
-  hasBush(x, z) { return this.bushes.has(`${x},${z}`); }
+  hasBush(x, z) { return this.inBounds(x, z) && this.bushGrid[z * this.width + x] === 1; }
 
   addBush(x, z, bornAt = Date.now(), variant = 0) {
     if (!this.isLand(x, z) || this.hasTree(x, z) || this.hasBush(x, z)) return false;
     this.bushes.set(`${x},${z}`, { x, z, bornAt, variant });
+    this.bushGrid[z * this.width + x] = 1;
     return true;
   }
 
-  removeBush(x, z) { return this.bushes.delete(`${x},${z}`); }
+  removeBush(x, z) {
+    if (!this.hasBush(x, z)) return false;
+    this.bushGrid[z * this.width + x] = 0;
+    return this.bushes.delete(`${x},${z}`);
+  }
 
   inBounds(x, z) {
     return x >= 0 && z >= 0 && x < this.width && z < this.height;
@@ -44,22 +53,31 @@ export class GameMap {
   }
 
   isWalkable(x, z) {
-    return (this.isLand(x, z) && !this.hasTree(x, z)) || this.hasBridge(x, z);
+    if (x < 0 || z < 0 || x >= this.width || z >= this.height) return false;
+    const i = z * this.width + x;
+    if (this.bridgeGrid[i]) return true;
+    const t = this.tiles[i];
+    return (t === TILE.GRASS || t === TILE.DIRT) && !this.treeGrid[i];
   }
 
-  hasBridge(x, z) { return this.bridges.has(`${x},${z}`); }
+  hasBridge(x, z) { return this.inBounds(x, z) && this.bridgeGrid[z * this.width + x] === 1; }
 
   canBuildBridge(x, z) { return this.get(x, z) === TILE.WATER && !this.hasBridge(x, z); }
 
   buildBridge(x, z, axis) {
     if (!this.canBuildBridge(x, z)) return false;
     this.bridges.set(`${x},${z}`, { x, z, axis });
+    this.bridgeGrid[z * this.width + x] = 1;
     return true;
   }
 
-  removeBridge(x, z) { return this.bridges.delete(`${x},${z}`); }
+  removeBridge(x, z) {
+    if (!this.hasBridge(x, z)) return false;
+    this.bridgeGrid[z * this.width + x] = 0;
+    return this.bridges.delete(`${x},${z}`);
+  }
 
-  hasTree(x, z) { return this.trees.has(`${x},${z}`); }
+  hasTree(x, z) { return this.inBounds(x, z) && this.treeGrid[z * this.width + x] === 1; }
 
   canPlant(x, z) { return this.isLand(x, z) && !this.hasTree(x, z); }
 
@@ -68,32 +86,48 @@ export class GameMap {
     if (!this.canPlant(x, z)) return false;
     this.removeBush(x, z);
     this.trees.set(`${x},${z}`, { x, z, plantedAt, majesticAt });
+    this.treeGrid[z * this.width + x] = 1;
     return true;
   }
 
-  removeTree(x, z) { return this.trees.delete(`${x},${z}`); }
+  removeTree(x, z) {
+    if (!this.hasTree(x, z)) return false;
+    this.treeGrid[z * this.width + x] = 0;
+    return this.trees.delete(`${x},${z}`);
+  }
 
-  // Plus court chemin sur la grille (4 directions), BFS.
+  // Case marchable, par indice (sans contrôle des bornes).
+  walkableAt(i) {
+    if (this.bridgeGrid[i]) return true;
+    const t = this.tiles[i];
+    return (t === TILE.GRASS || t === TILE.DIRT) && !this.treeGrid[i];
+  }
+
+  // Plus court chemin sur la grille (4 directions), BFS ; tampons réutilisés d'un appel à l'autre.
   findPath(sx, sz, tx, tz) {
-    if (!this.isWalkable(tx, tz)) return null;
-    const w = this.width;
-    const prev = new Int32Array(w * this.height).fill(-2);
+    if (!this.isWalkable(tx, tz) || !this.inBounds(sx, sz)) return null;
+    const w = this.width, h = this.height, n = w * h;
+    if (!this._prev || this._prev.length !== n) { this._prev = new Int32Array(n); this._queue = new Int32Array(n); }
+    const prev = this._prev, queue = this._queue;
+    prev.fill(-2);
     const start = sz * w + sx;
     const goal = tz * w + tx;
     prev[start] = -1;
-    const queue = [start];
-    for (let qi = 0; qi < queue.length; qi++) {
+    queue[0] = start;
+    let qn = 1;
+    for (let qi = 0; qi < qn; qi++) {
       const cur = queue[qi];
       if (cur === goal) break;
-      const cx = cur % w, cz = (cur / w) | 0;
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nx = cx + dx, nz = cz + dz;
-        if (!this.isWalkable(nx, nz)) continue;
-        const ni = nz * w + nx;
-        if (prev[ni] !== -2) continue;
-        prev[ni] = cur;
-        queue.push(ni);
-      }
+      const cx = cur % w, cz = (cur - cx) / w;
+      // Voisins dans le même ordre qu'avant : +x, -x, +z, -z.
+      let ni = cur + 1;
+      if (cx + 1 < w && prev[ni] === -2 && this.walkableAt(ni)) { prev[ni] = cur; queue[qn++] = ni; }
+      ni = cur - 1;
+      if (cx > 0 && prev[ni] === -2 && this.walkableAt(ni)) { prev[ni] = cur; queue[qn++] = ni; }
+      ni = cur + w;
+      if (cz + 1 < h && prev[ni] === -2 && this.walkableAt(ni)) { prev[ni] = cur; queue[qn++] = ni; }
+      ni = cur - w;
+      if (cz > 0 && prev[ni] === -2 && this.walkableAt(ni)) { prev[ni] = cur; queue[qn++] = ni; }
     }
     if (prev[goal] === -2) return null;
     const path = [];

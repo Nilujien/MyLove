@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 
+// Réglages de la traînée, partagés (pas d'objet créé par étincelle).
+const TRAIL = { spread: 0.05, up: 0.1, life: 0.45, size: 6 };
+
 // Graines lancées en cloche, avec une traînée d'étincelles.
 export class SeedThrower {
   constructor(scene, sparkles) {
@@ -36,7 +39,7 @@ export class SeedThrower {
       s.trail += dt;
       while (s.trail > 0.025) {
         s.trail -= 0.025;
-        this.sparkles.burst(p.x, p.y - 0.1, p.z, 1, { spread: 0.05, up: 0.1, life: 0.45, size: 6 });
+        this.sparkles.burst(p.x, p.y - 0.1, p.z, 1, TRAIL);
       }
       if (s.t >= 1) {
         this.scene.remove(s.mesh);

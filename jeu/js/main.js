@@ -104,10 +104,13 @@ function updateCamera(dt) {
 }
 
 // Vecteurs « droite » et « haut » de l'écran projetés sur le sol.
+// Vecteurs réutilisés (recalculés à chaque appel) : ne pas les conserver d'une image à l'autre.
+const axes = { right: new THREE.Vector3(), up: new THREE.Vector3() };
 function screenAxes() {
-  const right = new THREE.Vector3(Math.cos(cam.yaw), 0, -Math.sin(cam.yaw));
-  const up = new THREE.Vector3(-Math.sin(cam.yaw), 0, -Math.cos(cam.yaw));
-  return { right, up };
+  const c = Math.cos(cam.yaw), s = Math.sin(cam.yaw);
+  axes.right.set(c, 0, -s);
+  axes.up.set(-s, 0, -c);
+  return axes;
 }
 
 // Direction de grille (axe strict) la plus proche d'une direction écran.
@@ -207,11 +210,23 @@ function placeHeroSafely(force = false) {
   hero.teleport(best[0], best[1]);
 }
 
+// Sauvegarde différée : les demandes rapprochées (~400 ms) sont regroupées en une seule écriture,
+// et toute sauvegarde en attente est écrite immédiatement quand la page est masquée ou fermée.
+let saveTimer = 0;
 function saveMap() {
+  if (!saveTimer) saveTimer = setTimeout(flushSave, 400);
+}
+function flushSave() {
+  if (!saveTimer) return;
+  clearTimeout(saveTimer);
+  saveTimer = 0;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ map: map.toJSON(), hero: [hero.gridX, hero.gridZ], logs: inventory.logs }));
   } catch { /* stockage indisponible */ }
 }
+window.addEventListener('pagehide', flushSave);
+window.addEventListener('beforeunload', flushSave);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
 function loadMap() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -248,35 +263,123 @@ const cursorFill = new THREE.Mesh(
 cursor.add(cursorFill);
 let hoverCell = null;
 
-function isShown(o) {
-  for (; o; o = o.parent) if (!o.visible) return false;
-  return true;
+// Sélection analytique (sans lancer de rayon sur les maillages) : la caméra est orthographique,
+// on intersecte le rayon avec les silhouettes approchées des arbres, puis on parcourt les colonnes
+// de cases traversées sous le niveau de la terre (dessus, falaises, surface de l'eau).
+let canvasRect = null;
+window.addEventListener('resize', () => { canvasRect = null; });
+const PICK_BOTTOM = -1; // bas des falaises au bord de la carte
+const PICK_TREE_TOP = 5; // hauteur maximale d'un arbre (majestueux compris)
+let pickX = 0, pickZ = 0; // résultat de pickInto
+
+const smoothPick = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+// Paramètre du rayon à l'entrée dans l'ellipsoïde vertical qui approche le feuillage de l'arbre (Infinity sinon).
+function treeHit(tree, cx, cz, o, d, now) {
+  const g = tree.growth(now);
+  let r, y0, y1;
+  if (g < 0.3) {
+    r = 0.2; y0 = 0; y1 = 0.3; // graine, pousse
+  } else {
+    const mj = tree.majesty ? tree.majesty(now) : (tree.majestic ? 1 : 0);
+    const k = (0.25 + 0.75 * smoothPick(0.3, 1, g)) * (tree.sizeK ?? 1.25) * (1 + 0.55 * mj);
+    const hk0 = tree.heightK ?? 1;
+    const sy = k * (hk0 + (1.25 - hk0) * mj) * (1 + 0.15 * mj);
+    // Feuillage (repère de l'arbre) : rayon ~0,34, de 0,47 à 1,1 ; la couronne du majestueux monte plus haut.
+    r = k * (0.34 + 0.06 * mj);
+    y0 = sy * (0.47 - 0.12 * mj); y1 = sy * (1.1 + 0.42 * mj);
+  }
+  // Ellipsoïde : centre (cx, LAND_TOP + (y0 + y1) / 2, cz), demi-axes r (horizontal) et ry (vertical).
+  const ry = (y1 - y0) / 2, sk = r / ry;
+  const ox = o.x - cx, oy = (o.y - (LAND_TOP + y0 + ry)) * sk, oz = o.z - cz;
+  const dx = d.x, dy = d.y * sk, dz = d.z;
+  const a = dx * dx + dy * dy + dz * dz, b = ox * dx + oy * dy + oz * dz, c = ox * ox + oy * oy + oz * oz - r * r;
+  const disc = b * b - a * c;
+  if (disc < 0) return Infinity;
+  return (-b - Math.sqrt(disc)) / a;
+}
+
+// Case sous le pointeur, écrite dans pickX / pickZ ; renvoie false si aucune.
+function pickInto(clientX, clientY) {
+  const rect = canvasRect ??= canvas.getBoundingClientRect();
+  pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  const o = raycaster.ray.origin, d = raycaster.ray.direction;
+  if (d.y > -1e-6) return false;
+  const tLand = (LAND_TOP - o.y) / d.y;
+  // 1) Arbres : cases survolées entre le sommet des plus grands arbres et le sol.
+  const tHigh = (LAND_TOP + PICK_TREE_TOP - o.y) / d.y;
+  const ax = o.x + d.x * tHigh, az = o.z + d.z * tHigh, bx = o.x + d.x * tLand, bz = o.z + d.z * tLand;
+  let best = Infinity;
+  if (map.trees.size) {
+    const x0 = Math.max(0, Math.floor(Math.min(ax, bx) - 1)), x1 = Math.min(map.width - 1, Math.floor(Math.max(ax, bx) + 1));
+    const z0 = Math.max(0, Math.floor(Math.min(az, bz) - 1)), z1 = Math.min(map.height - 1, Math.floor(Math.max(az, bz) + 1));
+    const now = Date.now();
+    for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+      if (!map.hasTree(x, z)) continue;
+      const tree = forest.get(x, z);
+      if (!tree) continue;
+      const t = treeHit(tree, x + 0.5, z + 0.5, o, d, now);
+      if (t < best) { best = t; pickX = x; pickZ = z; }
+    }
+  }
+  if (best < Infinity) return true;
+  // 2) Terrain : parcours des colonnes traversées (DDA), du niveau de la terre jusqu'au bas des falaises.
+  const tWater = (WATER_LEVEL - o.y) / d.y, tEnd = (PICK_BOTTOM - o.y) / d.y;
+  let x = Math.floor(bx), z = Math.floor(bz);
+  const sx = d.x > 0 ? 1 : -1, sz = d.z > 0 ? 1 : -1;
+  const ddx = Math.abs(d.x) > 1e-9 ? Math.abs(1 / d.x) : Infinity, ddz = Math.abs(d.z) > 1e-9 ? Math.abs(1 / d.z) : Infinity;
+  let tx = ddx === Infinity ? Infinity : (x + (sx > 0 ? 1 : 0) - o.x) / d.x;
+  let tz = ddz === Infinity ? Infinity : (z + (sz > 0 ? 1 : 0) - o.z) / d.z;
+  let tIn = tLand;
+  for (let i = 0; i < 32; i++) {
+    const tOut = Math.min(tx, tz, tEnd);
+    if (map.inBounds(x, z)) {
+      // Terre (dessus ou falaise) ; un pont n'est visé que par son tablier, au niveau de la terre.
+      if (map.isLand(x, z) || (i === 0 && map.hasBridge(x, z))) { pickX = x; pickZ = z; return true; }
+      if (tWater >= tIn && tWater <= tOut) { pickX = x; pickZ = z; return true; }
+    }
+    if (tOut >= tEnd) break;
+    tIn = tOut;
+    if (tx < tz) { x += sx; tx += ddx; } else { z += sz; tz += ddz; }
+  }
+  return false;
 }
 
 function pickCell(clientX, clientY) {
-  const rect = canvas.getBoundingClientRect();
-  pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
-  raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObjects([terrain.landMesh, terrain.waterMesh, forest.group, bridges.group], true)
-    .find((h) => isShown(h.object)) ?? null;
-  if (!hit) return null;
-  for (let o = hit.object; o; o = o.parent) if (o.userData.cell) return o.userData.cell;
-  const p = hit.point.clone();
-  if (hit.object === terrain.landMesh && hit.face) p.addScaledVector(hit.face.normal, -0.01);
-  const x = Math.floor(p.x), z = Math.floor(p.z);
-  return map.inBounds(x, z) ? [x, z] : null;
+  return pickInto(clientX, clientY) ? [pickX, pickZ] : null;
 }
 
+// Survol : le pointeur est mémorisé à chaque mouvement, la case est recalculée une fois par image.
+const hover = { inside: false, x: 0, y: 0, moved: false };
+function updateHover() {
+  if (hover.inside && !panning) {
+    if (!pickInto(hover.x, hover.y)) hoverCell = null;
+    else if (!hoverCell || hoverCell[0] !== pickX || hoverCell[1] !== pickZ) hoverCell = [pickX, pickZ];
+  }
+  if (hover.moved) { hover.moved = false; updateTooltip(hover.x, hover.y); } else updateTooltip();
+}
+
+// Dernier état du curseur : rien n'est recalculé tant que la case, le mode, Maj ou le pinceau
+// ne changent pas (sauf toutes les 250 ms, pour l'inventaire, la position du personnage…).
+const cursorState = { x: NaN, z: NaN, mode: '', shift: false, brush: null, size: 0, ok: null, at: 0 };
 function updateCursor() {
   const target = menu.cell ?? hoverCell; // la case du menu reste surlignée tant qu'il est ouvert
   cursor.visible = !!target;
-  if (!target) return;
+  if (!target) { cursorState.x = NaN; return; }
   const size = state.mode === 'edit' && state.brush !== 'hero' ? state.brushSize : 1;
-  const [x, z] = target;
+  const x = target[0], z = target[1], cs = cursorState, now = performance.now();
+  if (x === cs.x && z === cs.z && state.mode === cs.mode && state.shift === cs.shift && state.brush === cs.brush
+    && size === cs.size && now - cs.at < 250) return;
+  cs.x = x; cs.z = z; cs.mode = state.mode; cs.shift = state.shift; cs.brush = state.brush; cs.size = size; cs.at = now;
   const y = map.isLand(x, z) || map.hasBridge(x, z) ? LAND_TOP : WATER_LEVEL;
   cursor.position.set(x + 0.5, y + 0.02, z + 0.5);
   cursor.scale.set(size, 1, size);
-  const ok = state.mode === 'edit' || (state.shift ? throwTargetError(x, z) === null : clickTargetOk(x, z));
+  // Lancer : mêmes règles que throwTargetError, sans construire le texte du message.
+  const ok = state.mode === 'edit'
+    || (state.shift ? !(x === hero.gridX && z === hero.gridZ) && !map.hasTree(x, z) && map.inBounds(x, z) : clickTargetOk(x, z));
+  if (ok === cs.ok) return;
+  cs.ok = ok;
   cursor.material.color.set(ok ? 0xffffff : 0xff6b6b);
   cursorFill.material.color.set(ok ? 0xffffff : 0xff6b6b);
 }
@@ -483,15 +586,18 @@ function describeBush(x, z) {
 
 // Évolution de la forêt, quelques fois par seconde.
 let ecologyClock = 0;
+const ecoHere = [0, 0];
+const ecoHooks = {
+  blocked: (x, z) => (x === ecoHere[0] && z === ecoHere[1]) || (x === hero.gridX && z === hero.gridZ),
+  variantOf: (x, z) => forest.get(x, z)?.variantIndex ?? 0,
+};
 function updateEcology(dt) {
   ecologyClock += dt;
   if (ecologyClock < 1.5) return;
   ecologyClock = 0;
   const here = heroCell();
-  const { majestic, bushes } = ecologyTick(map, {
-    blocked: (x, z) => (x === here[0] && z === here[1]) || (x === hero.gridX && z === hero.gridZ),
-    variantOf: (x, z) => forest.get(x, z)?.variantIndex ?? 0,
-  });
+  ecoHere[0] = here[0]; ecoHere[1] = here[1];
+  const { majestic, bushes } = ecologyTick(map, ecoHooks);
   for (const t of majestic) {
     sparkles.burst(t.x + 0.5, LAND_TOP + 1.2, t.z + 0.5, 60, { spread: 0.9, up: 0.8, life: 2.4, size: 10, colors: sparkles.goldColors });
   }
@@ -573,9 +679,9 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
   state.shift = e.shiftKey;
-  hoverCell = pickCell(e.clientX, e.clientY);
-  if (state.painting && hoverCell) paint(hoverCell);
-  updateTooltip(e.clientX, e.clientY);
+  hover.inside = true; hover.x = e.clientX; hover.y = e.clientY; hover.moved = true;
+  // En peinture, la case est calculée tout de suite (sinon : une fois par image, dans updateHover).
+  if (state.painting) { hoverCell = pickCell(e.clientX, e.clientY); if (hoverCell) paint(hoverCell); }
 });
 const endPointer = (e) => {
   if (state.painting) saveMap();
@@ -588,16 +694,27 @@ const endPointer = (e) => {
 };
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
-canvas.addEventListener('pointerleave', () => { hoverCell = null; updateTooltip(); });
+canvas.addEventListener('pointerleave', () => { hover.inside = false; hoverCell = null; updateTooltip(); });
 
 // Infobulle : stade de croissance de l'arbre survolé.
+// Le texte est recalculé quand la case change, sinon au plus 4 fois par seconde ;
+// le DOM n'est modifié que si quelque chose change.
+const tip = { el: document.getElementById('tooltip'), text: '', x: NaN, z: NaN, at: 0, px: NaN, py: NaN };
 function updateTooltip(px, py) {
-  const el = document.getElementById('tooltip');
-  const text = !hoverCell ? '' : map.hasTree(...hoverCell) ? describeTree(...hoverCell) : describeBush(...hoverCell);
-  el.hidden = !text;
-  if (!text) return;
-  if (px !== undefined) { el.style.left = `${px + 14}px`; el.style.top = `${py + 14}px`; }
-  el.textContent = text;
+  const el = tip.el, now = performance.now();
+  const x = hoverCell ? hoverCell[0] : NaN, z = hoverCell ? hoverCell[1] : NaN;
+  if (x !== tip.x || z !== tip.z || now - tip.at >= 250) {
+    tip.x = x; tip.z = z; tip.at = now;
+    const text = !hoverCell ? '' : map.hasTree(x, z) ? describeTree(x, z) : map.hasBush(x, z) ? describeBush(x, z) : '';
+    if (text !== tip.text) {
+      tip.text = text;
+      if (text) el.textContent = text;
+      if (el.hidden !== !text) el.hidden = !text;
+    }
+  }
+  if (!tip.text || px === undefined || (px === tip.px && py === tip.py)) return;
+  tip.px = px; tip.py = py;
+  el.style.left = `${px + 14}px`; el.style.top = `${py + 14}px`;
 }
 // ---------- Menu contextuel (clic droit) ----------
 const menu = { el: document.getElementById('ctxmenu'), cell: null };
@@ -709,14 +826,13 @@ window.addEventListener('blur', () => { held.clear(); state.shift = false; });
 
 // Déplacement continu tant qu'une touche est maintenue, une case à la fois.
 function handleHeldKeys() {
-  if (!held.size) return;
-  const code = [...held].pop();
-  const [sx, sy] = MOVE_KEYS[code];
-  const [dx, dz] = gridDirFromScreen(sx, sy);
-  if (!hero.busy && hero.path.length === 0) {
-    cam.follow = true;
-    hero.step(dx, dz, map);
-  }
+  if (!held.size || hero.busy || hero.path.length !== 0) return;
+  let code; // dernière touche enfoncée (ordre d'insertion du Set), sans copier le Set
+  for (code of held);
+  const dir = MOVE_KEYS[code];
+  const [dx, dz] = gridDirFromScreen(dir[0], dir[1]);
+  cam.follow = true;
+  hero.step(dx, dz, map);
 }
 
 // ---------- Interface ----------
@@ -816,7 +932,7 @@ renderer.setAnimationLoop(() => {
   pathPreview.update(dt, hero, shared.uTime.value);
   seeds.update(dt);
   sparkles.update(dt);
-  if (hoverCell && (map.hasTree(...hoverCell) || map.hasBush(...hoverCell))) updateTooltip();
+  updateHover();
   updateCamera(dt);
   updateSun();
   updateCursor();

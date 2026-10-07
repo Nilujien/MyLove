@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { LAND_TOP } from './terrain.js';
 
 const WOOD = [0xc79a6e, 0xb88a5f, 0xd2a87c].map((c) => new THREE.MeshLambertMaterial({ color: c, flatShading: true }));
@@ -7,6 +8,8 @@ const PLANK = new THREE.BoxGeometry(0.17, 0.05, 0.96);
 const BEAM = new THREE.BoxGeometry(1.0, 0.06, 0.07);
 const POST = new THREE.CylinderGeometry(0.035, 0.04, 1, 6).translate(0, 0.5, 0);
 const RAIL = new THREE.BoxGeometry(1.0, 0.03, 0.03);
+// Pont terminé : toutes les pièces fusionnées en un seul maillage, couleurs par sommet.
+const MERGED = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
 const DECK = LAND_TOP - 0.025; // centre des planches : le dessus affleure la terre
 
 function hash(x, z, k) {
@@ -50,8 +53,39 @@ class Bridge {
     }
     this.root.add(this.frame);
     this.t = animate ? 0 : 10;
-    this.update(0);
+    this.merged = null;
+    if (animate) this.update(0);
+    else this.merge();
   }
+
+  // Remplace les pièces séparées (utiles pour l'animation) par un maillage unique.
+  merge() {
+    this.frame.scale.set(1, 1, 1);
+    for (const p of this.planks) { p.visible = true; p.position.y = p.userData.y; }
+    this.root.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(this.root.matrixWorld).invert();
+    const m = new THREE.Matrix4();
+    const parts = [];
+    this.root.traverse((o) => {
+      if (!o.isMesh) return;
+      const g = o.geometry.clone();
+      g.applyMatrix4(m.multiplyMatrices(inv, o.matrixWorld));
+      const c = o.material.color, n = g.attributes.position.count;
+      const col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      parts.push(g);
+    });
+    const geometry = mergeGeometries(parts);
+    for (const g of parts) g.dispose();
+    this.root.clear();
+    this.merged = new THREE.Mesh(geometry, MERGED);
+    this.merged.castShadow = this.merged.receiveShadow = true;
+    this.root.add(this.merged);
+    this.planks = []; this.frame = null;
+  }
+
+  dispose() { this.merged?.geometry.dispose(); }
 
   // Animation de construction : les poteaux montent, puis les planches tombent une à une.
   update(dt) {
@@ -64,7 +98,7 @@ class Bridge {
       p.visible = k > 0;
       p.position.y = p.userData.y + (1 - k * k) * 0.6;
     }
-    if (this.t > 1.2) this.t = 10;
+    if (this.t > 1.2) { this.t = 10; this.merge(); }
   }
 }
 
@@ -76,9 +110,14 @@ export class Bridges {
   }
 
   // animateKey : clé "x,z" du pont tout juste construit (pour l'animer).
+  // Comparaison par valeur (case + sens) : annuler ou importer ne recrée pas les ponts inchangés.
   sync(map, animateKey = null) {
     for (const [key, b] of this.items) {
-      if (map.bridges.get(key) !== b.data) { this.group.remove(b.root); this.items.delete(key); }
+      const d = map.bridges.get(key);
+      if (d && d.axis === b.data.axis) { b.data = d; continue; }
+      this.group.remove(b.root);
+      b.dispose();
+      this.items.delete(key);
     }
     for (const [key, data] of map.bridges) {
       if (this.items.has(key)) continue;
