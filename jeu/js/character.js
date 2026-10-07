@@ -14,6 +14,7 @@ export class Character {
     this.time = 0;
     this.facing = [0, 1];
     this.crouch = 0; // animation de plantation (1 -> 0)
+    this.appear = 0; // animation de téléportation (1 -> 0)
 
     this.root = new THREE.Group();
     this.body = new THREE.Group();
@@ -63,6 +64,9 @@ export class Character {
   }
 
   playPlant() { this.crouch = 1; }
+
+  // Apparition (téléportation) : petit « pop » d'échelle.
+  blink() { this.appear = 1; }
 
   // Se tourne vers un point quelconque (lancer), en gardant une direction de grille pour « devant ».
   lookAt(dx, dz) {
@@ -118,6 +122,13 @@ export class Character {
       this.plan = null;
       if (plan?.face) this.face(plan.face[0] - this.gridX, plan.face[1] - this.gridZ);
       if (plan?.action) plan.action();
+    }
+
+    if (this.appear > 0) {
+      this.appear = Math.max(0, this.appear - dt * 2.5);
+      const t = 1 - this.appear;
+      const s = 1 + 2.2 * (t - 1) ** 3 + 1.2 * (t - 1) ** 2; // easeOutBack
+      this.root.scale.setScalar(Math.max(0.01, s));
     }
 
     let hop = 0, swing = 0;

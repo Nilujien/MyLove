@@ -268,10 +268,11 @@ function pickCell(clientX, clientY) {
 }
 
 function updateCursor() {
-  cursor.visible = !!hoverCell;
-  if (!hoverCell) return;
+  const target = menu.cell ?? hoverCell; // la case du menu reste surlignée tant qu'il est ouvert
+  cursor.visible = !!target;
+  if (!target) return;
   const size = state.mode === 'edit' && state.brush !== 'hero' ? state.brushSize : 1;
-  const [x, z] = hoverCell;
+  const [x, z] = target;
   const y = map.isLand(x, z) || map.hasBridge(x, z) ? LAND_TOP : WATER_LEVEL;
   cursor.position.set(x + 0.5, y + 0.02, z + 0.5);
   cursor.scale.set(size, 1, size);
@@ -539,9 +540,10 @@ let panning = null;
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
+  if (menu.cell) { closeMenu(); if (e.button === 0) return; }
   if (e.button === 1 || e.button === 2) {
-    panning = { x: e.clientX, y: e.clientY };
-    cam.follow = false;
+    // Glisser : déplace la vue. Clic droit sans glisser : menu contextuel (au relâchement).
+    panning = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, button: e.button, moved: false };
     return;
   }
   const cell = pickCell(e.clientX, e.clientY);
@@ -562,10 +564,12 @@ canvas.addEventListener('pointermove', (e) => {
   if (panning) {
     const worldPerPx = (camera.top - camera.bottom) / canvas.clientHeight;
     const { right, up } = screenAxes();
+    if (!panning.moved && Math.hypot(e.clientX - panning.x0, e.clientY - panning.y0) < 5) return;
+    if (!panning.moved) { panning.moved = true; cam.follow = false; }
     const dx = e.clientX - panning.x, dy = e.clientY - panning.y;
     cam.target.addScaledVector(right, -dx * worldPerPx);
     cam.target.addScaledVector(up, dy * worldPerPx * Math.sqrt(3));
-    panning = { x: e.clientX, y: e.clientY };
+    panning.x = e.clientX; panning.y = e.clientY;
     return;
   }
   state.shift = e.shiftKey;
@@ -573,9 +577,13 @@ canvas.addEventListener('pointermove', (e) => {
   if (state.painting && hoverCell) paint(hoverCell);
   updateTooltip(e.clientX, e.clientY);
 });
-const endPointer = () => {
+const endPointer = (e) => {
   if (state.painting) saveMap();
   state.painting = false;
+  if (e.type === 'pointerup' && panning?.button === 2 && !panning.moved && state.mode === 'play') {
+    const cell = pickCell(e.clientX, e.clientY);
+    if (cell) openMenu(cell, e.clientX, e.clientY);
+  }
   panning = null;
 };
 canvas.addEventListener('pointerup', endPointer);
@@ -591,8 +599,72 @@ function updateTooltip(px, py) {
   if (px !== undefined) { el.style.left = `${px + 14}px`; el.style.top = `${py + 14}px`; }
   el.textContent = text;
 }
+// ---------- Menu contextuel (clic droit) ----------
+const menu = { el: document.getElementById('ctxmenu'), cell: null };
+
+function tileLabel(x, z) {
+  if (map.hasTree(x, z)) return forest.get(x, z)?.majestic ? '✨ Arbre majestueux' : '🌳 Arbre';
+  if (map.hasBridge(x, z)) return '🌉 Pont';
+  if (map.hasBush(x, z)) return '🌿 Buisson';
+  return { [TILE.GRASS]: '🌱 Herbe', [TILE.DIRT]: '🟫 Terre', [TILE.WATER]: '💧 Eau' }[map.get(x, z)] ?? '';
+}
+
+function teleportError(x, z) {
+  if (x === hero.gridX && z === hero.gridZ && !hero.moving) return 'Tu es déjà ici';
+  if (!map.isWalkable(x, z)) return 'Case non praticable';
+  return null;
+}
+
+function openMenu(cell, px, py) {
+  const [x, z] = cell;
+  const items = [
+    { icon: '🌱', label: 'Lancer une graine', error: throwTargetError(x, z), run: () => throwSeed(cell) },
+    { icon: '✨', label: 'Se téléporter ici', error: teleportError(x, z), run: () => teleportHero(cell) },
+  ];
+  const el = menu.el;
+  el.replaceChildren();
+  const title = document.createElement('div');
+  title.className = 'ctx-title';
+  title.textContent = `${tileLabel(x, z)} · ${x}, ${z}`;
+  el.append(title);
+  for (const it of items) {
+    const b = document.createElement('button');
+    b.disabled = !!it.error;
+    b.innerHTML = `<span class="ctx-icon">${it.icon}</span><span><span class="ctx-label"></span><small></small></span>`;
+    b.querySelector('.ctx-label').textContent = it.label;
+    b.querySelector('small').textContent = it.error ?? '';
+    b.addEventListener('click', () => { closeMenu(); it.run(); });
+    el.append(b);
+  }
+  el.hidden = false;
+  // Placé près du curseur, sans déborder de l'écran.
+  const r = el.getBoundingClientRect();
+  el.style.left = `${Math.min(px + 6, window.innerWidth - r.width - 8)}px`;
+  el.style.top = `${Math.min(py + 6, window.innerHeight - r.height - 8)}px`;
+  menu.cell = cell;
+  el.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
+}
+
+function closeMenu() {
+  menu.el.hidden = true;
+  menu.cell = null;
+}
+
+function teleportHero([x, z]) {
+  if (teleportError(x, z)) return;
+  const p = hero.root.position;
+  sparkles.burst(p.x, p.y + 0.3, p.z, 30, { spread: 0.4, up: 1.4, life: 1, size: 9 });
+  hero.teleport(x, z);
+  hero.blink();
+  sparkles.burst(x + 0.5, LAND_TOP + 0.3, z + 0.5, 36, { spread: 0.5, up: 1.1, life: 1.2, size: 9 });
+  saveMap();
+}
+
+window.addEventListener('pointerdown', (e) => { if (menu.cell && !menu.el.contains(e.target) && e.target !== canvas) closeMenu(); });
+
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
+  closeMenu();
   cam.zoom = THREE.MathUtils.clamp(cam.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 0.35, 3);
   updateProjection();
 }, { passive: false });
@@ -610,6 +682,7 @@ window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
   switch (e.code) {
+    case 'Escape': closeMenu(); return;
     case 'Tab': e.preventDefault(); setMode(state.mode === 'play' ? 'edit' : 'play'); return;
     case 'KeyG': toggleGrid(); return;
     case 'ShiftLeft': case 'ShiftRight': state.shift = true; return;
@@ -656,6 +729,7 @@ const ui = {
 };
 
 function setMode(mode) {
+  closeMenu();
   state.mode = mode;
   document.body.dataset.mode = mode;
   ui.modeButtons.forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
@@ -750,4 +824,4 @@ renderer.setAnimationLoop(() => {
 });
 
 // Accès de débogage depuis la console.
-window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront, throwSeed, click: playClick, inventory, shrubs, ecology: () => { ecologyClock = 99; } };
+window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront, throwSeed, click: playClick, inventory, shrubs, camera, ecology: () => { ecologyClock = 99; } };

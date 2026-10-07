@@ -72,6 +72,14 @@
       padding: 6px 14px; opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none;
     }
     #toast.show { opacity: 1; transform: translate(-50%, 0); }
+    #ctxmenu { flex-direction: column; align-items: stretch; gap: 2px; min-width: 210px; padding: 6px; z-index: 5; }
+    #ctxmenu .ctx-title { color: var(--muted); font-size: 12px; padding: 2px 8px 6px; border-bottom: 1px solid var(--panel-border); margin-bottom: 2px; }
+    #ctxmenu button { justify-content: flex-start; text-align: left; background: transparent; padding: 7px 8px; }
+    #ctxmenu button:hover:not(:disabled), #ctxmenu button:focus-visible { background: rgba(255, 255, 255, 0.14); outline: none; }
+    #ctxmenu button:disabled { opacity: 0.45; cursor: default; }
+    #ctxmenu .ctx-icon { width: 1.4em; text-align: center; }
+    #ctxmenu small { display: block; color: var(--muted); font-size: 11px; }
+    #ctxmenu small:empty { display: none; }
     #tooltip {
       position: fixed; pointer-events: none; font-size: 12px;
       background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px; padding: 4px 8px;
@@ -136,11 +144,12 @@
   </div>
 
   <div id="inventory" class="panel play-only" title="Rondins : coupe des arbres (clic), construis des ponts (clic sur l'eau voisine)">🪵 <b>0</b></div>
+  <div id="ctxmenu" class="panel" hidden></div>
   <div id="toast"></div>
   <div id="tooltip" hidden></div>
 
   <div id="help" class="panel">
-    <span class="play-only">clic : aller · clic sur un arbre : le couper · clic sur l'eau voisine : pont (1 🪵) · <kbd>Maj</kbd>+clic : lancer une graine · <kbd>F</kbd> recentrer · <kbd>Flèches</kbd>/<kbd>ZQSD</kbd> se déplacer · <kbd>Espace</kbd> planter devant soi ·</span>
+    <span class="play-only">clic : aller · clic sur un arbre : le couper · clic sur l'eau voisine : pont (1 🪵) · <kbd>Maj</kbd>+clic : lancer une graine · clic droit : menu (graine, téléportation) · <kbd>F</kbd> recentrer · <kbd>Flèches</kbd>/<kbd>ZQSD</kbd> se déplacer · <kbd>Espace</kbd> planter devant soi ·</span>
     <span class="edit-only">clic gauche : peindre · <kbd>1</kbd>–<kbd>5</kbd> pinceau · <kbd>-</kbd>/<kbd>+</kbd> taille · <kbd>Ctrl+Z</kbd> annuler · clic droit : déplacer la vue · <kbd>F</kbd> recentrer ·</span>
     <span><kbd>G</kbd> grille · <kbd>E</kbd>/<kbd>R</kbd> pivoter · molette : zoom · <kbd>Tab</kbd> jouer/éditer</span>
   </div>
