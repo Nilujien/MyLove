@@ -113,6 +113,10 @@
       <button data-mode="play" title="Tab">🚶 Jouer</button>
       <button data-mode="edit" title="Tab">🛠️ Éditer</button>
     </div>
+    <div class="sep"></div>
+    <div class="group">
+      <button id="music-toggle" title="Musique (M)">🔇 Musique</button>
+    </div>
     <div class="sep play-only"></div>
     <div class="group play-only">
       <button data-action="plant" title="Espace">🌱 Planter</button>
@@ -152,9 +156,10 @@
   <div id="help" class="panel">
     <span class="play-only">clic : aller · clic sur un arbre : le couper · clic sur l'eau voisine : pont (1 🪵) · <kbd>Maj</kbd>+clic : lancer une graine · clic droit : menu (graine, téléportation) · <kbd>F</kbd> recentrer · <kbd>Flèches</kbd>/<kbd>ZQSD</kbd> se déplacer · <kbd>Espace</kbd> planter devant soi ·</span>
     <span class="edit-only">clic gauche : peindre · <kbd>1</kbd>–<kbd>5</kbd> pinceau · <kbd>-</kbd>/<kbd>+</kbd> taille · <kbd>Ctrl+Z</kbd> annuler · clic droit : déplacer la vue · <kbd>F</kbd> recentrer ·</span>
-    <span><kbd>G</kbd> grille · <kbd>E</kbd>/<kbd>R</kbd> pivoter · molette : zoom · <kbd>Tab</kbd> jouer/éditer</span>
+    <span><kbd>G</kbd> grille · <kbd>E</kbd>/<kbd>R</kbd> pivoter · molette : zoom · <kbd>Tab</kbd> jouer/éditer · <kbd>M</kbd> musique</span>
   </div>
 
   <script type="module" src="js/main.js"></script>
+  <script type="module" src="js/music.js"></script>
 </body>
 </html>
