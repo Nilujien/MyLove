@@ -59,6 +59,7 @@ const GEO = {
 
 // Durée (ms) de la métamorphose d'un arbre en arbre majestueux.
 const MAJESTIC_GROW = 8000;
+const MAX_HEIGHT_K = 1.25; // hauteur relative maximale (atteinte par les arbres majestueux)
 
 function rand(seed) {
   let a = seed | 0;
@@ -80,8 +81,9 @@ class Tree {
     this.variantIndex = Math.floor(r() * VARIANTS.length);
     this.variant = VARIANTS[this.variantIndex];
     this.phase = r() * Math.PI * 2;
-    this.heightK = 0.9 + r() * 0.35;
-    this.sizeK = 1.2 + r() * 0.25;
+    // Hauteur : de ~60 % à 100 % du maximum, les petits arbres étant un peu plus fréquents.
+    this.heightK = MAX_HEIGHT_K - r() ** 0.8 * 0.5;
+    this.sizeK = 1.45 - r() * 0.4;
     this.root = new THREE.Group();
     this.root.position.set(data.x + 0.5, LAND_TOP, data.z + 0.5);
     this.root.userData.cell = [data.x, data.z];
@@ -227,7 +229,8 @@ class Tree {
     this.tree.visible = treeS > 0;
     const mj = this.majesty(now);
     const k = treeS * pop * this.sizeK * (1 + 0.55 * mj);
-    this.tree.scale.set(k, k * this.heightK * (1 + 0.15 * mj), k);
+    const hk = this.heightK + (MAX_HEIGHT_K - this.heightK) * mj;
+    this.tree.scale.set(k, k * hk * (1 + 0.15 * mj), k);
     this.trunk.scale.set(1 + 0.45 * mj, 1, 1 + 0.45 * mj);
     for (const g of [this.crown, this.lanterns, this.roots]) {
       g.visible = mj > 0.001;
