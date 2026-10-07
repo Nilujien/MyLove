@@ -26,25 +26,56 @@ export const shared = {
   uHero: { value: new THREE.Vector3() },
 };
 
+// Constructeur de géométrie non indexée (facettes plates), dans des tableaux typés réutilisés.
+// Les sommets sont d'abord posés dans des « registres » (set), puis assemblés en triangles (tri/quad) :
+// aucune allocation par sommet ni par triangle.
+const REG = 8; // x, y, z, r, g, b, herbe, type
 class GeoBuilder {
-  constructor() { this.pos = []; this.col = []; this.surf = []; }
-  // v = { p:[x,y,z], c:Color, g:herbe 0..1, k:type }
+  constructor() {
+    this.reg = new Float32Array(32 * REG);
+    this.cap = 0; this.n = 0;
+    this.grow(8192);
+  }
+  grow(cap) {
+    const pos = new Float32Array(cap * 3), nor = new Float32Array(cap * 3);
+    const col = new Float32Array(cap * 3), surf = new Float32Array(cap * 2);
+    if (this.cap) { pos.set(this.pos); nor.set(this.nor); col.set(this.col); surf.set(this.surf); }
+    this.pos = pos; this.nor = nor; this.col = col; this.surf = surf; this.cap = cap;
+  }
+  reset() { this.n = 0; }
+  // Registre i : position, herbe (0..1), type de surface, couleur (murs).
+  set(i, x, y, z, g, k, c = WALL_TOP) {
+    const r = this.reg, o = i * REG;
+    r[o] = x; r[o + 1] = y; r[o + 2] = z;
+    r[o + 3] = c.r; r[o + 4] = c.g; r[o + 5] = c.b;
+    r[o + 6] = g; r[o + 7] = k;
+  }
   tri(a, b, c) {
-    for (const v of [a, b, c]) {
-      this.pos.push(...v.p);
-      const col = v.c ?? WALL_TOP;
-      this.col.push(col.r, col.g, col.b);
-      this.surf.push(v.g ?? 0, v.k);
+    if (this.n + 3 > this.cap) this.grow(this.cap * 2);
+    const r = this.reg, ao = a * REG, bo = b * REG, co = c * REG;
+    // Normale de face, calculée comme computeVertexNormals() sur une géométrie non indexée.
+    const cbx = r[co] - r[bo], cby = r[co + 1] - r[bo + 1], cbz = r[co + 2] - r[bo + 2];
+    const abx = r[ao] - r[bo], aby = r[ao + 1] - r[bo + 1], abz = r[ao + 2] - r[bo + 2];
+    let nx = cby * abz - cbz * aby, ny = cbz * abx - cbx * abz, nz = cbx * aby - cby * abx;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    const { pos, nor, col, surf } = this;
+    for (let s = 0; s < 3; s++) {
+      const o = (s === 0 ? ao : s === 1 ? bo : co), v = this.n++;
+      const v3 = v * 3, v2 = v * 2;
+      pos[v3] = r[o]; pos[v3 + 1] = r[o + 1]; pos[v3 + 2] = r[o + 2];
+      nor[v3] = nx; nor[v3 + 1] = ny; nor[v3 + 2] = nz;
+      col[v3] = r[o + 3]; col[v3 + 1] = r[o + 4]; col[v3 + 2] = r[o + 5];
+      surf[v2] = r[o + 6]; surf[v2 + 1] = r[o + 7];
     }
   }
   quad(a, b, c, d) { this.tri(a, b, c); this.tri(a, c, d); }
   build() {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
-    g.setAttribute('surf', new THREE.Float32BufferAttribute(this.surf, 2));
-    g.computeVertexNormals();
-    g.computeBoundingSphere();
+    const g = new THREE.BufferGeometry(), n = this.n;
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos.slice(0, n * 3), 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(this.nor.slice(0, n * 3), 3));
+    g.setAttribute('color', new THREE.BufferAttribute(this.col.slice(0, n * 3), 3));
+    g.setAttribute('surf', new THREE.BufferAttribute(this.surf.slice(0, n * 2), 2));
     return g;
   }
 }
@@ -207,12 +238,40 @@ function waterMaterial() {
   });
 }
 
+// Contour d'une tuile de terre (jusqu'à 8 points avec les chanfreins) : tampons réutilisés.
+const PX = new Float64Array(8), PZ = new Float64Array(8), PG = new Float64Array(8), PE = new Uint8Array(8);
+const EXP = new Uint8Array(4);
+const _ct = new THREE.Color(), _cb = new THREE.Color();
+// Registres du GeoBuilder : centre, cœur (1..8), anneau extérieur (9..16), murs et fond (20..23).
+const R_CENTER = 0, R_INNER = 1, R_OUTER = 9, R_A = 20, R_B = 21, R_C = 22, R_D = 23;
+
+// Le terrain est découpé en blocs de CHUNK × CHUNK tuiles : un Mesh par bloc (frustum culling,
+// reconstruction partielle quand l'éditeur modifie quelques cases).
+export const CHUNK = 8;
+
+// Blocs touchés par une liste de cases modifiées (avec une bordure d'une tuile : la géométrie d'une
+// tuile dépend de ses 8 voisines). Renvoie les indices de blocs, sans doublon.
+export function chunksAround(map, cells, ncx, border = 1) {
+  const seen = new Set();
+  for (const [x, z] of cells) {
+    const x0 = Math.max(0, x - border), x1 = Math.min(map.width - 1, x + border);
+    const z0 = Math.max(0, z - border), z1 = Math.min(map.height - 1, z + border);
+    for (let cz = Math.floor(z0 / CHUNK); cz <= Math.floor(z1 / CHUNK); cz++) {
+      for (let cx = Math.floor(x0 / CHUNK); cx <= Math.floor(x1 / CHUNK); cx++) seen.add(cz * ncx + cx);
+    }
+  }
+  return seen;
+}
+
 export class Terrain {
   constructor(scene) {
     this.scene = scene;
-    this.landMesh = new THREE.Mesh(new THREE.BufferGeometry(), landMaterial());
-    this.landMesh.castShadow = true;
-    this.landMesh.receiveShadow = true;
+    // Groupe des blocs de terrain. Le lancer de rayons rapporte le groupe lui-même comme objet touché
+    // (voir makeChunk), comme l'ancien Mesh unique : pickCell n'a pas besoin de connaître les blocs.
+    this.landMesh = new THREE.Group();
+    this.landMaterial = landMaterial();
+    this.chunks = []; this.ncx = 0; this.ncz = 0;
+    this.builder = new GeoBuilder();
     this.waterMaterial = waterMaterial();
     this.waterMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.waterMaterial);
     this.waterMesh.renderOrder = 1;
@@ -221,14 +280,84 @@ export class Terrain {
     scene.add(this.landMesh, this.waterMesh, this.waterSides);
   }
 
+  // Reconstruction complète (nouvelle carte, changement de taille).
   rebuild(map) {
     this.map = map;
-    this.landMesh.geometry.dispose();
-    this.landMesh.geometry = this.buildLand(map);
+    this.layoutChunks(map);
+    for (let i = 0; i < this.chunks.length; i++) this.buildChunk(map, i);
     if (this.waterW !== map.width || this.waterH !== map.height) this.buildWaterPlane(map);
     this.computeShore(map);
     this.waterSides.geometry.dispose();
     this.waterSides.geometry = this.buildWaterSides(map);
+  }
+
+  // Reconstruction partielle : seuls les blocs qui touchent les cases modifiées (± 1 tuile),
+  // l'écume autour d'elles et, si besoin, les faces latérales de l'eau.
+  rebuildCells(map, cells) {
+    if (map !== this.map || this.waterW !== map.width || this.waterH !== map.height) { this.rebuild(map); return; }
+    if (!cells.length) return;
+    for (const ci of chunksAround(map, cells, this.ncx)) this.buildChunk(map, ci);
+    // Une case modifiée influe sur l'écume jusqu'à SHORE_MAX tuiles autour.
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of cells) {
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (z < z0) z0 = z; if (z > z1) z1 = z;
+    }
+    const R = SHORE_MAX + 1;
+    this.computeShore(map, x0 - R, z0 - R, x1 + 1 + R, z1 + 1 + R);
+    // Faces latérales de l'eau : seulement quand une case du bord de la carte change.
+    if (cells.some(([x, z]) => x <= 0 || z <= 0 || x >= map.width - 1 || z >= map.height - 1)) {
+      this.waterSides.geometry.dispose();
+      this.waterSides.geometry = this.buildWaterSides(map);
+    }
+  }
+
+  layoutChunks(map) {
+    const ncx = Math.ceil(map.width / CHUNK), ncz = Math.ceil(map.height / CHUNK);
+    if (ncx === this.ncx && ncz === this.ncz && this.chunkW === map.width && this.chunkH === map.height) return;
+    for (const m of this.chunks) { this.landMesh.remove(m); m.geometry.dispose(); }
+    this.chunks = [];
+    this.ncx = ncx; this.ncz = ncz; this.chunkW = map.width; this.chunkH = map.height;
+    for (let cz = 0; cz < ncz; cz++) for (let cx = 0; cx < ncx; cx++) {
+      const x0 = cx * CHUNK, z0 = cz * CHUNK;
+      this.chunks.push(this.makeChunk(x0, z0, Math.min(map.width, x0 + CHUNK), Math.min(map.height, z0 + CHUNK)));
+    }
+  }
+
+  makeChunk(x0, z0, x1, z1) {
+    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.landMaterial);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData = { x0, z0, x1, z1 };
+    // Sphère et boîte englobantes connues d'avance : du socle au dessus des tuiles.
+    mesh.userData.box = new THREE.Box3(new THREE.Vector3(x0, BASE, z0), new THREE.Vector3(x1, LAND_TOP, z1));
+    mesh.userData.sphere = mesh.userData.box.getBoundingSphere(new THREE.Sphere());
+    const group = this.landMesh;
+    mesh.raycast = function (raycaster, intersects) {
+      const n = intersects.length;
+      THREE.Mesh.prototype.raycast.call(this, raycaster, intersects);
+      for (let i = n; i < intersects.length; i++) intersects[i].object = group;
+    };
+    this.landMesh.add(mesh);
+    return mesh;
+  }
+
+  buildChunk(map, ci) {
+    const mesh = this.chunks[ci], { x0, z0, x1, z1, box, sphere } = mesh.userData;
+    const b = this.builder;
+    b.reset();
+    for (let z = z0; z < z1; z++) {
+      for (let x = x0; x < x1; x++) {
+        const t = map.get(x, z);
+        if (t === TILE.WATER) this.buildWaterCell(b, map, x, z);
+        else this.buildLandCell(b, map, x, z, t);
+      }
+    }
+    mesh.geometry.dispose();
+    const g = b.build();
+    g.boundingBox = box.clone();
+    g.boundingSphere = sphere.clone();
+    mesh.geometry = g;
   }
 
   exposure(map, x, z) {
@@ -237,22 +366,13 @@ export class Terrain {
     return t === TILE.WATER ? EXPOSE_WATER : EXPOSE_NONE;
   }
 
-  buildLand(map) {
-    const b = new GeoBuilder();
-    for (let z = 0; z < map.height; z++) {
-      for (let x = 0; x < map.width; x++) {
-        const t = map.get(x, z);
-        if (t === TILE.WATER) this.buildWaterCell(b, map, x, z);
-        else this.buildLandCell(b, map, x, z, t);
-      }
-    }
-    return b.build();
-  }
-
   // Fond sableux sous l'eau (aussi visible sous les coins arrondis des tuiles de terre).
   floor(b, x, z) {
-    const v = (px, pz) => ({ p: [px, FLOOR, pz], k: K_FLOOR });
-    b.quad(v(x, z), v(x, z + 1), v(x + 1, z + 1), v(x + 1, z));
+    b.set(R_A, x, FLOOR, z, 0, K_FLOOR);
+    b.set(R_B, x, FLOOR, z + 1, 0, K_FLOOR);
+    b.set(R_C, x + 1, FLOOR, z + 1, 0, K_FLOOR);
+    b.set(R_D, x + 1, FLOOR, z, 0, K_FLOOR);
+    b.quad(R_A, R_B, R_C, R_D);
   }
 
   buildWaterCell(b, map, x, z) {
@@ -262,62 +382,68 @@ export class Terrain {
       const [dx, dz] = EDGE_DIRS[e];
       if (map.get(x + dx, z + dz) !== -1) continue;
       const p = CORNERS[e], q = CORNERS[(e + 1) % 4];
-      this.wall(b, [x + p[0], z + p[1]], [x + q[0], z + q[1]], FLOOR, BASE, false);
+      this.wall(b, x + p[0], z + p[1], x + q[0], z + q[1], FLOOR, BASE, false);
     }
   }
 
   buildLandCell(b, map, x, z, type) {
-    const exp = EDGE_DIRS.map(([dx, dz]) => this.exposure(map, x + dx, z + dz));
+    for (let e = 0; e < 4; e++) EXP[e] = this.exposure(map, x + EDGE_DIRS[e][0], z + EDGE_DIRS[e][1]);
     const own = type === TILE.GRASS ? 1 : 0;
     // Contour de la tuile, avec coins chanfreinés quand deux bords voisins donnent sur l'eau.
-    const pts = []; // { p:[x,z], g, exposedAfter }
+    let n = 0;
     for (let i = 0; i < 4; i++) {
       const prevE = (i + 3) % 4, nextE = i;
-      const c = [x + CORNERS[i][0], z + CORNERS[i][1]];
-      if (exp[prevE] === EXPOSE_WATER && exp[nextE] === EXPOSE_WATER) {
-        const cp = [x + CORNERS[(i + 3) % 4][0], z + CORNERS[(i + 3) % 4][1]];
-        const cn = [x + CORNERS[(i + 1) % 4][0], z + CORNERS[(i + 1) % 4][1]];
-        pts.push({ p: [c[0] + (cp[0] - c[0]) * CHAMFER, c[1] + (cp[1] - c[1]) * CHAMFER], g: own, exposedAfter: EXPOSE_WATER });
-        pts.push({ p: [c[0] + (cn[0] - c[0]) * CHAMFER, c[1] + (cn[1] - c[1]) * CHAMFER], g: own, exposedAfter: exp[nextE] });
+      const c0 = x + CORNERS[i][0], c1 = z + CORNERS[i][1];
+      if (EXP[prevE] === EXPOSE_WATER && EXP[nextE] === EXPOSE_WATER) {
+        const cp = CORNERS[(i + 3) % 4], cn = CORNERS[(i + 1) % 4];
+        PX[n] = c0 + (x + cp[0] - c0) * CHAMFER; PZ[n] = c1 + (z + cp[1] - c1) * CHAMFER; PG[n] = own; PE[n++] = EXPOSE_WATER;
+        PX[n] = c0 + (x + cn[0] - c0) * CHAMFER; PZ[n] = c1 + (z + cn[1] - c1) * CHAMFER; PG[n] = own; PE[n++] = EXP[nextE];
       } else {
-        pts.push({ p: c, g: cornerGrassiness(map, c[0], c[1]), exposedAfter: exp[nextE] });
+        PX[n] = c0; PZ[n] = c1; PG[n] = cornerGrassiness(map, c0, c1); PE[n++] = EXP[nextE];
       }
     }
-    if (pts.length > 4) this.floor(b, x, z);
+    if (n > 4) this.floor(b, x, z);
 
     // Dessus : cœur à la valeur de la tuile, anneau extérieur fondu avec les voisines.
     const cx = x + 0.5, cz = z + 0.5;
-    const top = (p, g) => ({ p: [p[0], LAND_TOP, p[1]], g, k: K_TOP });
-    const center = top([cx, cz], own);
-    const inner = pts.map((pt) => top([cx + (pt.p[0] - cx) * INNER, cz + (pt.p[1] - cz) * INNER], own));
-    const outer = pts.map((pt) => top(pt.p, pt.g));
-    for (let i = 0; i < pts.length; i++) {
-      const j = (i + 1) % pts.length;
-      b.tri(center, inner[i], inner[j]);
-      b.quad(inner[i], outer[i], outer[j], inner[j]);
+    b.set(R_CENTER, cx, LAND_TOP, cz, own, K_TOP);
+    for (let i = 0; i < n; i++) {
+      b.set(R_INNER + i, cx + (PX[i] - cx) * INNER, LAND_TOP, cz + (PZ[i] - cz) * INNER, own, K_TOP);
+      b.set(R_OUTER + i, PX[i], LAND_TOP, PZ[i], PG[i], K_TOP);
+    }
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      b.tri(R_CENTER, R_INNER + i, R_INNER + j);
+      b.quad(R_INNER + i, R_OUTER + i, R_OUTER + j, R_INNER + j);
     }
     // Falaises.
-    for (let i = 0; i < pts.length; i++) {
-      const kind = pts[i].exposedAfter;
+    for (let i = 0; i < n; i++) {
+      const kind = PE[i];
       if (kind === EXPOSE_NONE) continue;
-      const p = pts[i].p, q = pts[(i + 1) % pts.length].p;
-      this.wall(b, p, q, LAND_TOP, kind === EXPOSE_VOID ? BASE : FLOOR, type === TILE.GRASS);
+      const j = (i + 1) % n;
+      this.wall(b, PX[i], PZ[i], PX[j], PZ[j], LAND_TOP, kind === EXPOSE_VOID ? BASE : FLOOR, type === TILE.GRASS);
     }
   }
 
   // Mur vertical orienté vers l'extérieur (le contour tourne dans le sens qui met l'extérieur à gauche).
-  wall(b, p, q, top, bottom, grassLip) {
+  wall(b, px, pz, qx, qz, top, bottom, grassLip) {
     let y = top;
     if (grassLip) {
-      const v = (pt, yy) => ({ p: [pt[0], yy, pt[1]], k: K_LIP });
-      b.quad(v(p, y), v(p, y - LIP), v(q, y - LIP), v(q, y));
+      b.set(R_A, px, y, pz, 0, K_LIP);
+      b.set(R_B, px, y - LIP, pz, 0, K_LIP);
+      b.set(R_C, qx, y - LIP, qz, 0, K_LIP);
+      b.set(R_D, qx, y, qz, 0, K_LIP);
+      b.quad(R_A, R_B, R_C, R_D);
       y -= LIP;
     }
     const h = top - BASE;
-    const ct = WALL_BOTTOM.clone().lerp(WALL_TOP, (y - BASE) / h);
-    const cb = WALL_BOTTOM.clone().lerp(WALL_TOP, (bottom - BASE) / h);
-    const v = (pt, yy, c) => ({ p: [pt[0], yy, pt[1]], c, k: K_WALL });
-    b.quad(v(p, y, ct), v(p, bottom, cb), v(q, bottom, cb), v(q, y, ct));
+    _ct.lerpColors(WALL_BOTTOM, WALL_TOP, (y - BASE) / h);
+    _cb.lerpColors(WALL_BOTTOM, WALL_TOP, (bottom - BASE) / h);
+    b.set(R_A, px, y, pz, 0, K_WALL, _ct);
+    b.set(R_B, px, bottom, pz, 0, K_WALL, _cb);
+    b.set(R_C, qx, bottom, qz, 0, K_WALL, _cb);
+    b.set(R_D, qx, y, qz, 0, K_WALL, _ct);
+    b.quad(R_A, R_B, R_C, R_D);
   }
 
   buildWaterPlane(map) {
@@ -331,17 +457,26 @@ export class Terrain {
     this.waterW = w; this.waterH = h;
     this.waterMesh.geometry.dispose();
     this.waterMesh.geometry = g;
+    this.landMask = new Uint8Array(w * h);
   }
 
   // Distance de chaque sommet d'eau à la terre la plus proche : profondeur et écume.
-  computeShore(map) {
+  // Sans rectangle : tout le plan ; sinon seulement les sommets du rectangle [x0, x1] × [z0, z1] (en tuiles).
+  computeShore(map, x0 = 0, z0 = 0, x1 = map.width, z1 = map.height) {
     const pos = this.waterMesh.geometry.getAttribute('position');
     const shore = this.waterMesh.geometry.getAttribute('shore');
     const R = SHORE_MAX, W = map.width, H = map.height;
-    const land = new Uint8Array(W * H);
-    for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) land[z * W + x] = map.isLand(x, z) ? 1 : 0;
-    for (let i = 0; i < pos.count; i++) {
-      const px = pos.getX(i), pz = pos.getZ(i);
+    const land = this.landMask, t = map.tiles;
+    for (let i = 0; i < W * H; i++) land[i] = t[i] === TILE.GRASS || t[i] === TILE.DIRT ? 1 : 0;
+    // Le plan d'eau est une grille de (W·RES+1) × (H·RES+1) sommets, rangée par lignes de z.
+    const NX = W * WATER_RES + 1;
+    const ix0 = Math.max(0, x0 * WATER_RES), ix1 = Math.min(NX - 1, x1 * WATER_RES);
+    const iz0 = Math.max(0, z0 * WATER_RES), iz1 = Math.min(H * WATER_RES, z1 * WATER_RES);
+    if (ix0 > ix1 || iz0 > iz1) return;
+    const arr = shore.array, P = pos.array;
+    for (let iz = iz0; iz <= iz1; iz++) for (let ix = ix0; ix <= ix1; ix++) {
+      const i = iz * NX + ix;
+      const px = P[i * 3], pz = P[i * 3 + 2];
       const bx = Math.floor(px), bz = Math.floor(pz);
       let best = R * R;
       for (let z = Math.max(0, bz - R); z <= Math.min(H - 1, bz + R); z++) {
@@ -354,24 +489,27 @@ export class Terrain {
           if (d < best) best = d;
         }
       }
-      shore.setX(i, Math.sqrt(best));
+      arr[i] = Math.sqrt(best);
     }
+    const start = iz0 * NX + ix0, end = iz1 * NX + ix1;
+    // Plage ajoutée même pour un calcul complet : plusieurs appels dans une même image se cumulent.
+    shore.addUpdateRange(start, end - start + 1);
     shore.needsUpdate = true;
   }
 
   // Faces latérales de l'eau, uniquement là où une case d'eau touche le bord de la carte.
   buildWaterSides(map) {
     const pos = [], shore = [];
-    const push = (pt, y) => { pos.push(pt[0], y, pt[1]); shore.push(SHORE_MAX); };
+    const push = (px, pz, y) => { pos.push(px, y, pz); shore.push(SHORE_MAX); };
     for (let z = 0; z < map.height; z++) for (let x = 0; x < map.width; x++) {
       if (map.get(x, z) !== TILE.WATER) continue;
       for (let e = 0; e < 4; e++) {
         const [dx, dz] = EDGE_DIRS[e];
         if (map.get(x + dx, z + dz) !== -1) continue;
-        const p = [x + CORNERS[e][0], z + CORNERS[e][1]];
-        const q = [x + CORNERS[(e + 1) % 4][0], z + CORNERS[(e + 1) % 4][1]];
-        push(p, WATER_LEVEL); push(p, FLOOR); push(q, FLOOR);
-        push(p, WATER_LEVEL); push(q, FLOOR); push(q, WATER_LEVEL);
+        const px = x + CORNERS[e][0], pz = z + CORNERS[e][1];
+        const qx = x + CORNERS[(e + 1) % 4][0], qz = z + CORNERS[(e + 1) % 4][1];
+        push(px, pz, WATER_LEVEL); push(px, pz, FLOOR); push(qx, qz, FLOOR);
+        push(px, pz, WATER_LEVEL); push(qx, qz, FLOOR); push(qx, qz, WATER_LEVEL);
       }
     }
     const g = new THREE.BufferGeometry();

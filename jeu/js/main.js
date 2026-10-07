@@ -146,26 +146,63 @@ function refreshWorld() {
   forest.sync(map);
   bridges.sync(map);
   shrubs.sync(map);
-  buildGrid();
+  dirty.tiles.length = 0; dirty.hide.length = 0; dirty.show.length = 0; dirty.objects = false;
+  gridDirty = true;
+  if (state.grid[state.mode]) buildGrid();
 }
 
-// Grille affichée en mode édition.
-let gridLines = null;
-function buildGrid() {
-  if (gridLines) { scene.remove(gridLines); gridLines.geometry.dispose(); }
-  const pts = [];
-  const seg = (x0, z0, x1, z1, y) => pts.push(x0, y, z0, x1, y, z1);
-  for (let z = 0; z < map.height; z++) for (let x = 0; x < map.width; x++) {
-    const y = (map.isLand(x, z) ? LAND_TOP : WATER_LEVEL) + 0.005;
-    seg(x, z, x + 1, z, y); seg(x, z, x, z + 1, y);
-    seg(x + 1, z, x + 1, z + 1, y); seg(x, z + 1, x + 1, z + 1, y);
+// Modifications de l'éditeur en attente : appliquées une fois par image (flushRebuild).
+const dirty = { tiles: [], hide: [], show: [], objects: false };
+function flushRebuild() {
+  if (dirty.tiles.length) {
+    terrain.rebuildCells(map, dirty.tiles);
+    grass.rebuildCells(map, dirty.tiles);
+    gridDirty = true;
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  gridLines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 }));
-  gridLines.renderOrder = 2;
+  // Arbres plantés / coupés sans changement de tuile : seuls leurs brins sont masqués / rétablis.
+  for (const [x, z] of dirty.hide) grass.setTileHidden(x, z, map.hasTree(x, z));
+  for (const [x, z] of dirty.show) grass.setTileHidden(x, z, map.hasTree(x, z));
+  if (dirty.objects) { forest.sync(map); bridges.sync(map); shrubs.sync(map); }
+  dirty.tiles.length = 0; dirty.hide.length = 0; dirty.show.length = 0; dirty.objects = false;
+  // Grille reconstruite seulement quand elle est affichée.
+  if (gridDirty && state.grid[state.mode]) buildGrid();
+}
+
+// Grille affichée en mode édition : chaque arête une seule fois (deux si elle sépare terre et eau).
+let gridLines = null, gridDirty = true;
+// Opacité 0.51 = deux passes à 0.3 : l'ancienne grille traçait deux fois chaque arête intérieure.
+const gridMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.51 });
+function buildGrid() {
+  const W = map.width, H = map.height;
+  const maxSeg = 2 * ((W + 1) * H + (H + 1) * W);
+  let attr = gridLines?.geometry.getAttribute('position');
+  if (!attr || attr.count < maxSeg * 2) {
+    if (gridLines) { scene.remove(gridLines); gridLines.geometry.dispose(); }
+    const g = new THREE.BufferGeometry();
+    attr = new THREE.BufferAttribute(new Float32Array(maxSeg * 6), 3);
+    g.setAttribute('position', attr);
+    gridLines = new THREE.LineSegments(g, gridMaterial);
+    gridLines.renderOrder = 2;
+    gridLines.frustumCulled = false;
+    scene.add(gridLines);
+  }
+  const a = attr.array;
+  let n = 0;
+  const lvl = (x, z) => { const t = map.get(x, z); return t === -1 ? -1 : (t === TILE.WATER ? WATER_LEVEL : LAND_TOP) + 0.005; };
+  const seg = (x0, z0, x1, z1, y) => { a[n++] = x0; a[n++] = y; a[n++] = z0; a[n++] = x1; a[n++] = y; a[n++] = z1; };
+  // Arête entre deux cases (ou une case et le vide) : tracée à la hauteur de chacune.
+  const edge = (x0, z0, x1, z1, ya, yb) => {
+    if (ya >= 0) seg(x0, z0, x1, z1, ya);
+    if (yb >= 0 && yb !== ya) seg(x0, z0, x1, z1, yb);
+  };
+  for (let z = 0; z <= H; z++) for (let x = 0; x < W; x++) edge(x, z, x + 1, z, lvl(x, z - 1), lvl(x, z));
+  for (let z = 0; z < H; z++) for (let x = 0; x <= W; x++) edge(x, z, x, z + 1, lvl(x - 1, z), lvl(x, z));
+  gridLines.geometry.setDrawRange(0, n / 3);
+  attr.clearUpdateRanges();
+  attr.addUpdateRange(0, n);
+  attr.needsUpdate = true;
   gridLines.visible = state.grid[state.mode];
-  scene.add(gridLines);
+  gridDirty = false;
 }
 
 function setMap(m, recenterHero = false) {
@@ -304,28 +341,45 @@ function brushCells([cx, cz]) {
   return cells;
 }
 
+// Ne modifie que la carte : le monde est mis à jour une fois par image (flushRebuild).
+let lastPaintCell = null;
 function paint(cell) {
+  lastPaintCell = cell;
   if (state.brush === 'hero') {
     if (map.isWalkable(...cell)) hero.teleport(...cell);
     return;
   }
-  let changed = false, treesChanged = false;
   for (const [x, z] of brushCells(cell)) {
     const onHero = x === hero.gridX && z === hero.gridZ;
     if (state.brush === 'tree') {
       // Arbre déjà adulte en mode édition.
-      if (!onHero && map.plant(x, z, Date.now() - GROW_TIME * 1000)) treesChanged = true;
+      if (!onHero && map.plant(x, z, Date.now() - GROW_TIME * 1000)) { dirty.objects = true; dirty.hide.push([x, z]); }
       continue;
     }
     if (state.brush === TILE.WATER && onHero) continue;
     // Les pinceaux de terrain effacent les arbres.
-    if (map.removeTree(x, z)) treesChanged = true;
-    if (map.removeBridge(x, z)) treesChanged = true;
-    if (map.removeBush(x, z)) treesChanged = true;
-    changed = map.set(x, z, state.brush) || changed;
+    if (map.removeTree(x, z)) { dirty.objects = true; dirty.show.push([x, z]); }
+    if (map.removeBridge(x, z)) dirty.objects = true;
+    if (map.removeBush(x, z)) dirty.objects = true;
+    if (map.set(x, z, state.brush)) dirty.tiles.push([x, z]);
   }
-  if (changed) refreshWorld();
-  else if (treesChanged) { forest.sync(map); bridges.sync(map); shrubs.sync(map); grass.rebuild(map); }
+}
+
+// Peint toutes les cases entre la précédente et « cell » (Bresenham) : pas de trous si la souris va vite.
+function paintTo(cell) {
+  const from = lastPaintCell;
+  if (!from || state.brush === 'hero') { paint(cell); return; }
+  let [x, z] = from;
+  const [x1, z1] = cell;
+  if (x === x1 && z === z1) return;
+  const dx = Math.abs(x1 - x), dz = -Math.abs(z1 - z), sx = x < x1 ? 1 : -1, sz = z < z1 ? 1 : -1;
+  let err = dx + dz;
+  while (x !== x1 || z !== z1) {
+    const e2 = 2 * err;
+    if (e2 >= dz) { err += dz; x += sx; }
+    if (e2 <= dx) { err += dx; z += sz; }
+    paint([x, z]);
+  }
 }
 
 // Plante une graine sur la case devant le personnage.
@@ -524,14 +578,19 @@ function toast(text) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
 }
 
+// Instantané léger : copie des tuiles (Uint8Array) et des objets posés.
+const copyEntries = (m) => new Map([...m].map(([k, v]) => [k, { ...v }]));
 function pushUndo() {
-  undoStack.push(map.toJSON());
+  undoStack.push({ w: map.width, h: map.height, tiles: map.tiles.slice(), trees: copyEntries(map.trees), bushes: copyEntries(map.bushes), bridges: copyEntries(map.bridges) });
   if (undoStack.length > 50) undoStack.shift();
 }
 function undo() {
   const s = undoStack.pop();
   if (!s) return;
-  setMap(GameMap.fromJSON(s));
+  const m = new GameMap(s.w, s.h);
+  m.tiles.set(s.tiles);
+  m.trees = s.trees; m.bushes = s.bushes; m.bridges = s.bridges;
+  setMap(m);
   saveMap();
 }
 
@@ -574,7 +633,7 @@ canvas.addEventListener('pointermove', (e) => {
   }
   state.shift = e.shiftKey;
   hoverCell = pickCell(e.clientX, e.clientY);
-  if (state.painting && hoverCell) paint(hoverCell);
+  if (state.painting && hoverCell) paintTo(hoverCell);
   updateTooltip(e.clientX, e.clientY);
 });
 const endPointer = (e) => {
@@ -816,6 +875,8 @@ renderer.setAnimationLoop(() => {
   pathPreview.update(dt, hero, shared.uTime.value);
   seeds.update(dt);
   sparkles.update(dt);
+  flushRebuild();
+  grass.setZoom(cam.zoom);
   if (hoverCell && (map.hasTree(...hoverCell) || map.hasBush(...hoverCell))) updateTooltip();
   updateCamera(dt);
   updateSun();
@@ -828,4 +889,4 @@ renderer.setAnimationLoop(() => {
 // Réglages de diagnostic (mesures de performances).
 const perf = { bloom: true };
 window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront, throwSeed, click: playClick, inventory, shrubs, camera, ecology: () => { ecologyClock = 99; },
-  debug: { perf, renderer, composer, bloom, scene, grass, motes, sparkles, bridges, pathPreview, seeds, refreshWorld, paint, saveMap, state, buildGrid } };
+  debug: { perf, renderer, composer, bloom, scene, grass, motes, sparkles, bridges, pathPreview, seeds, refreshWorld, paint, paintTo, flushRebuild, saveMap, state, buildGrid } };
