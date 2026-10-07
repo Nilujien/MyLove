@@ -44,6 +44,7 @@ export class Sparkles {
     this.points.renderOrder = 6;
     scene.add(this.points);
     this.colors = [new THREE.Color(0xfff2c4), new THREE.Color(0xc8f7d8), new THREE.Color(0xffd0ec)];
+    this.goldColors = [new THREE.Color(0xffe6a0), new THREE.Color(0xfff6d8), new THREE.Color(0xffd27a)];
     this.woodColors = [new THREE.Color(0xe0b080), new THREE.Color(0xfff0c8), new THREE.Color(0xc8f0c8)];
     this.waterColors = [new THREE.Color(0xbff4ff), new THREE.Color(0x8fe0f0), new THREE.Color(0xffffff)];
   }

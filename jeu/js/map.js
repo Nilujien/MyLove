@@ -9,7 +9,18 @@ export class GameMap {
     this.tiles = new Uint8Array(width * height).fill(fill);
     this.trees = new Map(); // "x,z" -> { x, z, plantedAt } (horodatage en ms)
     this.bridges = new Map(); // "x,z" -> { x, z, axis } (axis : 'x' ou 'z', sens de la traversée)
+    this.bushes = new Map(); // "x,z" -> { x, z, bornAt, variant } (buissons de lisière, traversables)
   }
+
+  hasBush(x, z) { return this.bushes.has(`${x},${z}`); }
+
+  addBush(x, z, bornAt = Date.now(), variant = 0) {
+    if (!this.isLand(x, z) || this.hasTree(x, z) || this.hasBush(x, z)) return false;
+    this.bushes.set(`${x},${z}`, { x, z, bornAt, variant });
+    return true;
+  }
+
+  removeBush(x, z) { return this.bushes.delete(`${x},${z}`); }
 
   inBounds(x, z) {
     return x >= 0 && z >= 0 && x < this.width && z < this.height;
@@ -52,9 +63,11 @@ export class GameMap {
 
   canPlant(x, z) { return this.isLand(x, z) && !this.hasTree(x, z); }
 
-  plant(x, z, plantedAt = Date.now()) {
+  // Une graine plantée sur un buisson le remplace.
+  plant(x, z, plantedAt = Date.now(), majesticAt = 0) {
     if (!this.canPlant(x, z)) return false;
-    this.trees.set(`${x},${z}`, { x, z, plantedAt });
+    this.removeBush(x, z);
+    this.trees.set(`${x},${z}`, { x, z, plantedAt, majesticAt });
     return true;
   }
 
@@ -90,8 +103,9 @@ export class GameMap {
 
   toJSON() {
     return {
-      version: 3, width: this.width, height: this.height, tiles: Array.from(this.tiles),
-      trees: [...this.trees.values()].map(({ x, z, plantedAt }) => [x, z, plantedAt]),
+      version: 4, width: this.width, height: this.height, tiles: Array.from(this.tiles),
+      trees: [...this.trees.values()].map(({ x, z, plantedAt, majesticAt }) => [x, z, plantedAt, majesticAt || 0]),
+      bushes: [...this.bushes.values()].map(({ x, z, bornAt, variant }) => [x, z, bornAt, variant]),
       bridges: [...this.bridges.values()].map(({ x, z, axis }) => [x, z, axis]),
     };
   }
@@ -106,8 +120,14 @@ export class GameMap {
     }
     map.tiles.set(data.tiles.map((t) => (t in TILE_NAMES ? t : TILE.GRASS)));
     for (const tree of Array.isArray(data.trees) ? data.trees : []) {
-      const [x, z, plantedAt] = tree;
-      if (Number.isInteger(x) && Number.isInteger(z) && Number.isFinite(plantedAt)) map.plant(x, z, plantedAt);
+      const [x, z, plantedAt, majesticAt] = tree;
+      if (Number.isInteger(x) && Number.isInteger(z) && Number.isFinite(plantedAt)) {
+        map.plant(x, z, plantedAt, Number.isFinite(majesticAt) ? majesticAt : 0);
+      }
+    }
+    for (const bush of Array.isArray(data.bushes) ? data.bushes : []) {
+      const [x, z, bornAt, variant] = bush;
+      if (Number.isInteger(x) && Number.isInteger(z) && Number.isFinite(bornAt)) map.addBush(x, z, bornAt, variant | 0);
     }
     for (const bridge of Array.isArray(data.bridges) ? data.bridges : []) {
       const [x, z, axis] = bridge;
@@ -121,7 +141,8 @@ export class GameMap {
     const ox = Math.floor((width - this.width) / 2), oz = Math.floor((height - this.height) / 2);
     const m = new GameMap(width, height, fill);
     for (let z = 0; z < this.height; z++) for (let x = 0; x < this.width; x++) m.set(x + ox, z + oz, this.get(x, z));
-    for (const t of this.trees.values()) m.plant(t.x + ox, t.z + oz, t.plantedAt);
+    for (const t of this.trees.values()) m.plant(t.x + ox, t.z + oz, t.plantedAt, t.majesticAt);
+    for (const b of this.bushes.values()) m.addBush(b.x + ox, b.z + oz, b.bornAt, b.variant);
     for (const b of this.bridges.values()) m.buildBridge(b.x + ox, b.z + oz, b.axis);
     return { map: m, ox, oz };
   }

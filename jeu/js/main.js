@@ -10,6 +10,8 @@ import { GrassField } from './grass.js';
 import { Motes } from './motes.js';
 import { Forest, GROW_TIME, stageOf, logsFor } from './trees.js';
 import { Bridges } from './bridges.js';
+import { Shrubs, bushGrowth } from './bushes.js';
+import { ecologyTick, adultNeighbors, MAJESTIC_NEIGHBORS } from './ecology.js';
 import { PathPreview } from './path.js';
 import { Sparkles } from './sparkles.js';
 import { SeedThrower } from './seeds.js';
@@ -127,6 +129,7 @@ const sparkles = new Sparkles(scene);
 const forest = new Forest(scene, sparkles);
 const seeds = new SeedThrower(scene, sparkles);
 const bridges = new Bridges(scene);
+const shrubs = new Shrubs(scene);
 const pathPreview = new PathPreview(scene);
 const inventory = { logs: savedLogs };
 
@@ -142,6 +145,7 @@ function refreshWorld() {
   grass.rebuild(map);
   forest.sync(map);
   bridges.sync(map);
+  shrubs.sync(map);
   buildGrid();
 }
 
@@ -316,10 +320,11 @@ function paint(cell) {
     // Les pinceaux de terrain effacent les arbres.
     if (map.removeTree(x, z)) treesChanged = true;
     if (map.removeBridge(x, z)) treesChanged = true;
+    if (map.removeBush(x, z)) treesChanged = true;
     changed = map.set(x, z, state.brush) || changed;
   }
   if (changed) refreshWorld();
-  else if (treesChanged) { forest.sync(map); bridges.sync(map); grass.rebuild(map); }
+  else if (treesChanged) { forest.sync(map); bridges.sync(map); shrubs.sync(map); grass.rebuild(map); }
 }
 
 // Plante une graine sur la case devant le personnage.
@@ -331,6 +336,7 @@ function plantInFront() {
   }
   map.plant(x, z);
   forest.sync(map);
+  shrubs.sync(map);
   grass.setTileHidden(x, z, true);
   hero.playPlant();
   sparkles.burst(x + 0.5, LAND_TOP + 0.05, z + 0.5, 24, { spread: 0.4, up: 0.8, life: 1, size: 8 });
@@ -377,6 +383,7 @@ function landSeed(x, z, at) {
   }
   map.plant(x, z);
   forest.sync(map);
+  shrubs.sync(map);
   grass.setTileHidden(x, z, true);
   sparkles.burst(at.x, at.y, at.z, 24, { spread: 0.4, up: 0.8, life: 1, size: 8 });
   saveMap();
@@ -432,7 +439,7 @@ function goNextTo(cell, action) {
 function chopTree([x, z]) {
   const tree = forest.get(x, z);
   if (!tree || !isAdjacent([hero.gridX, hero.gridZ], [x, z])) return;
-  const n = logsFor(tree.growth());
+  const n = logsFor(tree.growth(), tree.majestic);
   if (!n) { toast('🌱 Trop jeune pour être coupé'); return; }
   map.removeTree(x, z);
   forest.fell(x, z, x - hero.gridX, z - hero.gridZ);
@@ -466,13 +473,43 @@ function addLogs(n) {
   el.classList.add('bump');
 }
 
+function describeBush(x, z) {
+  const b = map.bushes.get(`${x},${z}`);
+  if (!b) return '';
+  const g = bushGrowth(b);
+  return g >= 1 ? '🌺 Buisson en fleurs' : `🌿 Buisson · ${Math.floor(g * 100)} %`;
+}
+
+// Évolution de la forêt, quelques fois par seconde.
+let ecologyClock = 0;
+function updateEcology(dt) {
+  ecologyClock += dt;
+  if (ecologyClock < 1.5) return;
+  ecologyClock = 0;
+  const here = heroCell();
+  const { majestic, bushes } = ecologyTick(map, {
+    blocked: (x, z) => (x === here[0] && z === here[1]) || (x === hero.gridX && z === hero.gridZ),
+    variantOf: (x, z) => forest.get(x, z)?.variantIndex ?? 0,
+  });
+  for (const t of majestic) {
+    sparkles.burst(t.x + 0.5, LAND_TOP + 1.2, t.z + 0.5, 60, { spread: 0.9, up: 0.8, life: 2.4, size: 10, colors: sparkles.goldColors });
+  }
+  if (majestic.length) toast('✨ Un arbre devient majestueux');
+  if (bushes.length) shrubs.sync(map);
+  if (majestic.length || bushes.length) saveMap();
+}
+
 function describeTree(x, z) {
   const tree = forest.get(x, z);
   if (!tree) return '';
   const g = tree.growth();
-  const n = logsFor(g);
+  const n = logsFor(g, tree.majestic);
   const hint = n ? ` · clic : couper (${n} 🪵)` : ' · trop jeune pour être coupé';
-  if (g >= 1) return `🌸 ${stageOf(g).name}${hint}`;
+  if (tree.majestic) return `✨ Arbre majestueux${hint}`;
+  if (g >= 1) {
+    const around = adultNeighbors(map, x, z);
+    return `🌸 ${stageOf(g).name} · ${around}/${MAJESTIC_NEIGHBORS} arbres autour pour devenir majestueux${hint}`;
+  }
   const left = Math.ceil((1 - g) * GROW_TIME);
   return `🌳 ${stageOf(g).name} · ${Math.floor(g * 100)} % (encore ${left} s)${hint}`;
 }
@@ -548,7 +585,7 @@ canvas.addEventListener('pointerleave', () => { hoverCell = null; updateTooltip(
 // Infobulle : stade de croissance de l'arbre survolé.
 function updateTooltip(px, py) {
   const el = document.getElementById('tooltip');
-  const text = hoverCell && map.hasTree(...hoverCell) ? describeTree(...hoverCell) : '';
+  const text = !hoverCell ? '' : map.hasTree(...hoverCell) ? describeTree(...hoverCell) : describeBush(...hoverCell);
   el.hidden = !text;
   if (!text) return;
   if (px !== undefined) { el.style.left = `${px + 14}px`; el.style.top = `${py + 14}px`; }
@@ -700,10 +737,12 @@ renderer.setAnimationLoop(() => {
   terrain.update(dt);
   forest.update(dt);
   bridges.update(dt);
+  shrubs.update(dt, hero.root.position);
+  updateEcology(dt);
   pathPreview.update(dt, hero, shared.uTime.value);
   seeds.update(dt);
   sparkles.update(dt);
-  if (hoverCell && map.hasTree(...hoverCell)) updateTooltip();
+  if (hoverCell && (map.hasTree(...hoverCell) || map.hasBush(...hoverCell))) updateTooltip();
   updateCamera(dt);
   updateSun();
   updateCursor();
@@ -711,4 +750,4 @@ renderer.setAnimationLoop(() => {
 });
 
 // Accès de débogage depuis la console.
-window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront, throwSeed, click: playClick, inventory };
+window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront, throwSeed, click: playClick, inventory, shrubs, ecology: () => { ecologyClock = 99; } };

@@ -14,7 +14,8 @@ export const STAGES = [
   { from: 1, name: 'Arbre en fleurs' },
 ];
 // Rondins obtenus en coupant un arbre, selon sa croissance (0 : trop jeune).
-export function logsFor(g) {
+export function logsFor(g, majestic = false) {
+  if (majestic) return 6;
   if (g < 0.35) return 0;
   if (g < 0.75) return 1;
   return g < 1 ? 2 : 3;
@@ -26,7 +27,7 @@ export function stageOf(g) {
   return s;
 }
 
-const VARIANTS = [
+export const VARIANTS = [
   { leaves: [0x7fd6a4, 0x9fe6b8, 0x6cc495], blossom: 0xfff4c8 }, // menthe
   { leaves: [0x6fc7c9, 0x8fdcd8, 0x5ab3ba], blossom: 0xe6f2ff }, // turquoise
   { leaves: [0xf2b6d2, 0xf8cfe2, 0xe9a3c4], blossom: 0xffffff }, // cerisier
@@ -51,7 +52,13 @@ const GEO = {
   stem: new THREE.CylinderGeometry(0.012, 0.018, 0.22, 5).translate(0, 0.11, 0),
   leaf: new THREE.SphereGeometry(1, 8, 6).scale(0.08, 0.015, 0.04),
   blossom: new THREE.IcosahedronGeometry(0.045, 0),
+  root: new THREE.ConeGeometry(0.05, 0.3, 5).rotateZ(Math.PI / 2).translate(0.15, 0, 0),
+  strand: new THREE.CylinderGeometry(0.004, 0.004, 1, 3).translate(0, -0.5, 0),
+  lantern: new THREE.IcosahedronGeometry(0.04, 1),
 };
+
+// Durée (ms) de la métamorphose d'un arbre en arbre majestueux.
+const MAJESTIC_GROW = 8000;
 
 function rand(seed) {
   let a = seed | 0;
@@ -70,7 +77,8 @@ class Tree {
   constructor(data) {
     this.data = data;
     const r = rand(data.x * 73856093 ^ data.z * 19349663 ^ (data.plantedAt | 0));
-    this.variant = VARIANTS[Math.floor(r() * VARIANTS.length)];
+    this.variantIndex = Math.floor(r() * VARIANTS.length);
+    this.variant = VARIANTS[this.variantIndex];
     this.phase = r() * Math.PI * 2;
     this.heightK = 0.9 + r() * 0.35;
     this.sizeK = 1.2 + r() * 0.25;
@@ -101,6 +109,7 @@ class Tree {
     this.tree = new THREE.Group();
     const trunk = new THREE.Mesh(GEO.trunk, mat(0x8b6b6e));
     trunk.castShadow = true;
+    this.trunk = trunk;
     this.tree.add(trunk);
     this.canopy = new THREE.Group();
     this.canopy.position.y = 0.55;
@@ -129,8 +138,71 @@ class Tree {
       this.canopy.add(b);
       this.blossoms.push(b);
     }
+    this.buildMajestic(r, blobPositions);
     this.root.add(this.seedGroup, this.sprout, this.tree);
     this.matured = this.growth() >= 1;
+  }
+
+  // Parure de l'arbre majestueux : couronne lumineuse, lanternes suspendues, racines.
+  buildMajestic(r, blobPositions) {
+    this.crown = new THREE.Group();
+    const glow = (c) => mat(c, 0.32);
+    const crownBlobs = [[0, 0.62, 0, 0.3], [0.22, 0.45, -0.12, 0.24], [-0.2, 0.5, 0.14, 0.24], [0.05, 0.85, 0.02, 0.19], [-0.26, 0.28, -0.15, 0.2], [0.26, 0.26, 0.2, 0.2]];
+    crownBlobs.forEach(([x, y, z, sc], i) => {
+      const m = new THREE.Mesh(GEO.blob, glow(this.variant.leaves[(i + 1) % 3]));
+      m.position.set(x, y, z);
+      m.scale.setScalar(sc * (0.9 + r() * 0.2));
+      m.rotation.set(r() * 3, r() * 3, r() * 3);
+      m.castShadow = true;
+      this.crown.add(m);
+    });
+    // Fleurs dorées sur la couronne.
+    const gold = mat(0xffe7a8, 1.2);
+    for (let i = 0; i < 10; i++) {
+      const [x, y, z, sc] = crownBlobs[Math.floor(r() * crownBlobs.length)];
+      const dir = new THREE.Vector3(r() - 0.5, r() * 0.8 + 0.2, r() - 0.5).normalize();
+      const b = new THREE.Mesh(GEO.blossom, gold);
+      b.position.set(x, y, z).addScaledVector(dir, sc * 0.95);
+      this.crown.add(b);
+    }
+    this.canopy.add(this.crown);
+    // Lanternes de lumière suspendues sous le feuillage.
+    this.lanterns = new THREE.Group();
+    const lanternMat = mat(this.variant.blossom, 1.6);
+    const strandMat = mat(0xd8c8b0, 0.3);
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2 + r() * 0.5;
+      const rad = 0.26 + r() * 0.1, len = 0.12 + r() * 0.16;
+      const g = new THREE.Group();
+      g.position.set(Math.cos(a) * rad, 0.08 + r() * 0.08, Math.sin(a) * rad);
+      const strand = new THREE.Mesh(GEO.strand, strandMat);
+      strand.scale.y = len;
+      const lantern = new THREE.Mesh(GEO.lantern, lanternMat);
+      lantern.position.y = -len;
+      g.add(strand, lantern);
+      g.userData.phase = r() * 6;
+      this.lanterns.add(g);
+    }
+    this.canopy.add(this.lanterns);
+    // Racines apparentes.
+    this.roots = new THREE.Group();
+    const rootMat = mat(0x7d5e62);
+    for (let i = 0; i < 5; i++) {
+      const m = new THREE.Mesh(GEO.root, rootMat);
+      m.rotation.y = (i / 5) * Math.PI * 2 + r() * 0.4;
+      m.rotation.z = -0.25;
+      m.position.y = 0.02;
+      this.roots.add(m);
+    }
+    this.tree.add(this.roots);
+    for (const g of [this.crown, this.lanterns, this.roots]) g.visible = false;
+  }
+
+  get majestic() { return !!this.data.majesticAt; }
+
+  majesty(now = Date.now()) {
+    if (!this.data.majesticAt) return 0;
+    return smooth(0, 1, (now - this.data.majesticAt) / MAJESTIC_GROW);
   }
 
   growth(now = Date.now()) {
@@ -153,8 +225,17 @@ class Tree {
     const treeS = g < 0.3 ? 0 : 0.25 + 0.75 * smooth(0.3, 1, g);
     const pop = easeOutBack(smooth(0.3, 0.4, g));
     this.tree.visible = treeS > 0;
-    const k = treeS * pop * this.sizeK;
-    this.tree.scale.set(k, k * this.heightK, k);
+    const mj = this.majesty(now);
+    const k = treeS * pop * this.sizeK * (1 + 0.55 * mj);
+    this.tree.scale.set(k, k * this.heightK * (1 + 0.15 * mj), k);
+    this.trunk.scale.set(1 + 0.45 * mj, 1, 1 + 0.45 * mj);
+    for (const g of [this.crown, this.lanterns, this.roots]) {
+      g.visible = mj > 0.001;
+      g.scale.setScalar(Math.max(0.001, easeOutBack(mj)));
+    }
+    if (mj > 0) {
+      for (const l of this.lanterns.children) l.rotation.z = Math.sin(t * 1.6 + l.userData.phase) * 0.18;
+    }
     const bloom = g >= 1 ? Math.min(1, (now - this.data.plantedAt - GROW_TIME * 1000) / 2500) : 0;
     for (const b of this.blossoms) {
       const k = easeOutBack(smooth(b.userData.delay * 0.6, b.userData.delay * 0.6 + 0.4, bloom));
@@ -228,6 +309,12 @@ export class Forest {
       }
     }
     for (const tree of this.trees.values()) {
+      // Aura des arbres majestueux : poussières dorées qui s'élèvent du feuillage.
+      if (tree.majestic && Math.random() < dt * 2.5 * tree.majesty(now)) {
+        const p = tree.root.position, a = Math.random() * Math.PI * 2, r = 0.2 + Math.random() * 0.5;
+        this.sparkles.burst(p.x + Math.cos(a) * r, p.y + 0.9 + Math.random() * 0.9, p.z + Math.sin(a) * r, 1,
+          { spread: 0.05, up: 0.35, life: 2.2, size: 7, colors: this.sparkles.goldColors });
+      }
       if (tree.update(now, t)) {
         const p = tree.root.position;
         this.sparkles.burst(p.x, p.y + 0.8, p.z, 45, { spread: 0.6, up: 0.9, life: 1.8, size: 10 });
