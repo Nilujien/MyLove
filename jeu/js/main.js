@@ -820,8 +820,12 @@ renderer.setAnimationLoop(() => {
   updateCamera(dt);
   updateSun();
   updateCursor();
-  composer.render(dt);
+  if (perf.bloom) composer.render(dt);
+  else renderer.render(scene, camera);
 });
 
 // Accès de débogage depuis la console.
-window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront, throwSeed, click: playClick, inventory, shrubs, camera, ecology: () => { ecologyClock = 99; } };
+// Réglages de diagnostic (mesures de performances).
+const perf = { bloom: true };
+window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront, throwSeed, click: playClick, inventory, shrubs, camera, ecology: () => { ecologyClock = 99; },
+  debug: { perf, renderer, composer, bloom, scene, grass, motes, sparkles, bridges, pathPreview, seeds, refreshWorld, paint, saveMap, state, buildGrid } };
