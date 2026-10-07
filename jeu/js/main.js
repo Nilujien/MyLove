@@ -22,10 +22,12 @@ const STORAGE_KEY = 'iso-jeu-carte-v1';
 
 // ---------- Scène ----------
 const canvas = document.getElementById('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Pas d'antialiasing sur le canvas : tout passe par le composer, dont la cible a son propre MSAA.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+const PIXEL_RATIO_MAX = Math.min(window.devicePixelRatio, 1.5);
+renderer.setPixelRatio(PIXEL_RATIO_MAX);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap; // même nombre de lectures que PCF (16 contre 17), plus doux
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.95;
 
@@ -53,6 +55,7 @@ sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.bias = -0.0005;
 sun.shadow.normalBias = 0.02;
+sun.shadow.autoUpdate = false; // mise à jour à la demande, voir updateSun()
 scene.add(sun, sun.target);
 
 // ---------- Caméra isométrique ----------
@@ -68,9 +71,10 @@ const VIEW = 7; // demi-hauteur visible (en tuiles) à zoom 1
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
+  const pr = renderer.getPixelRatio();
   renderer.setSize(w, h, false);
-  composer.setPixelRatio(renderer.getPixelRatio());
-  composer.setSize(w, h);
+  // Le composer travaille en pixels réels (son ratio reste 1) : une seule réallocation.
+  composer.setSize(Math.round(w * pr), Math.round(h * pr));
   updateProjection();
 }
 
@@ -137,9 +141,16 @@ const pathPreview = new PathPreview(scene);
 const inventory = { logs: savedLogs };
 
 // Post-traitement : halo lumineux (bloom) sur les reflets et les poussières de lumière.
-const composer = new EffectComposer(renderer);
+// Cible avec MSAA 4× : c'est elle qui porte l'antialiasing de la scène.
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(
+  Math.round(window.innerWidth * PIXEL_RATIO_MAX), Math.round(window.innerHeight * PIXEL_RATIO_MAX),
+  { type: THREE.HalfFloatType, samples: 4 }));
+composer.setPixelRatio(1); // le composer travaille directement en pixels réels
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.7, 0.82);
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2), 0.55, 0.7, 0.82);
+// Halo calculé à demi-résolution (sa première passe est déjà à 1/2 de ce qu'on lui donne : 1/4 au total).
+const bloomSetSize = bloom.setSize.bind(bloom);
+bloom.setSize = (w, h) => bloomSetSize(Math.round(w / 2), Math.round(h / 2));
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
@@ -217,21 +228,75 @@ function setMap(m, recenterHero = false) {
 // Le soleil (et sa zone d'ombre) suit la vue : ombres nettes quelle que soit la taille de la carte.
 const SUN_OFFSET = new THREE.Vector3(14, 24, 8);
 shared.uSunDir.value.copy(SUN_OFFSET).normalize();
-let shadowRadius = 0;
+let shadowRadius = 0, shadowFrame = 0;
 function updateSun() {
   const r = THREE.MathUtils.clamp(16 / cam.zoom, 16, 48);
   const texel = (2 * r) / sun.shadow.mapSize.x;
   // Alignement sur les texels de l'ombre pour éviter le scintillement en déplacement.
   const tx = Math.round(cam.target.x / texel) * texel, tz = Math.round(cam.target.z / texel) * texel;
+  // Carte d'ombre recalculée une image sur deux (balancement des arbres, croissance…), mais à
+  // chaque image dès que la vue, le héros ou une graine bouge : pas de retard visible.
+  let dirty = (++shadowFrame & 1) === 0 || hero.busy || seeds.flying?.length > 0
+    || sun.target.position.x !== tx || sun.target.position.z !== tz;
   sun.target.position.set(tx, 0, tz);
   sun.position.copy(sun.target.position).add(SUN_OFFSET);
   if (r !== shadowRadius) {
-    shadowRadius = r;
+    shadowRadius = r; dirty = true;
     const s = sun.shadow.camera;
     s.left = -r; s.right = r; s.top = r; s.bottom = -r; s.near = 1; s.far = 90;
     s.updateProjectionMatrix();
   }
+  if (dirty) sun.shadow.needsUpdate = true;
   motes.setCenter(cam.target.x, cam.target.z);
+}
+
+// ---------- Qualité adaptative ----------
+// Paliers, du plus beau au plus économe : résolution, puis taille de l'ombre, puis halo coupé.
+const QUALITY = [];
+for (let pr = PIXEL_RATIO_MAX; pr > 1.001; pr -= 0.25) QUALITY.push({ pr, shadow: 2048, bloom: true });
+QUALITY.push({ pr: Math.min(1, PIXEL_RATIO_MAX), shadow: 1024, bloom: true });
+QUALITY.push({ pr: Math.min(1, PIXEL_RATIO_MAX), shadow: 1024, bloom: false });
+const SLOW_MS = 22; // au-delà (moyenne sur la fenêtre), on descend d'un palier
+const FAST_MS = 17.5; // en deçà (≈ 60 i/s tenues, le rAF ne descend pas sous la synchro écran), on retente
+const adapt = { last: 0, t0: 0, frames: 0, fastWindows: 0, holdUntil: 0, lastUp: -Infinity, ban: 15000, banUntil: 0 };
+
+function setQuality(i) {
+  i = THREE.MathUtils.clamp(i, 0, QUALITY.length - 1);
+  const q = QUALITY[i];
+  perf.quality = i; perf.pixelRatio = q.pr; perf.bloom = q.bloom;
+  if (sun.shadow.mapSize.x !== q.shadow) {
+    sun.shadow.mapSize.set(q.shadow, q.shadow);
+    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+    sun.shadow.needsUpdate = true;
+  }
+  if (renderer.getPixelRatio() !== q.pr) { renderer.setPixelRatio(q.pr); resize(); }
+}
+
+// Mesure le temps moyen entre images sur ~2 s et ajuste le palier (avec hystérésis).
+function adaptQuality() {
+  const now = performance.now();
+  const gap = now - adapt.last;
+  adapt.last = now;
+  // Onglet caché, pause du débogueur… : on recommence la fenêtre.
+  if (!perf.adaptive || gap > 2000 || document.hidden) { adapt.t0 = now; adapt.frames = 0; return; }
+  adapt.frames++;
+  if (now - adapt.t0 < 2000) return;
+  const avg = (now - adapt.t0) / adapt.frames;
+  adapt.t0 = now; adapt.frames = 0;
+  perf.frameMs = Math.round(avg * 10) / 10;
+  if (now < adapt.holdUntil) return; // fenêtre qui suit un changement : réallocations, on l'ignore
+  if (avg > SLOW_MS && perf.quality < QUALITY.length - 1) {
+    // Montée ratée peu après avoir été tentée : on attend de plus en plus longtemps avant de retenter.
+    if (now - adapt.lastUp < 10000) { adapt.banUntil = now + adapt.ban; adapt.ban = Math.min(adapt.ban * 2, 240000); }
+    adapt.fastWindows = 0;
+    adapt.holdUntil = now + 1000;
+    setQuality(perf.quality + 1);
+  } else if (avg < FAST_MS && perf.quality > 0 && now >= adapt.banUntil) {
+    if (++adapt.fastWindows >= 2) {
+      adapt.fastWindows = 0; adapt.lastUp = now; adapt.holdUntil = now + 1000;
+      setQuality(perf.quality - 1);
+    }
+  } else adapt.fastWindows = 0;
 }
 
 function placeHeroSafely(force = false) {
@@ -997,12 +1062,14 @@ renderer.setAnimationLoop(() => {
   updateCamera(dt);
   updateSun();
   updateCursor();
+  adaptQuality();
   if (perf.bloom) composer.render(dt);
   else renderer.render(scene, camera);
 });
 
 // Accès de débogage depuis la console.
 // Réglages de diagnostic (mesures de performances).
-const perf = { bloom: true };
+// adaptive : qualité ajustée au temps d'image (false pour des mesures stables) ; quality : palier de levels.
+const perf = { bloom: true, adaptive: true, quality: 0, pixelRatio: PIXEL_RATIO_MAX, frameMs: 0, levels: QUALITY, setQuality };
 window.game = { get map() { return map; }, hero, cam, setMap, terrain, forest, plantInFront, throwSeed, click: playClick, inventory, shrubs, camera, ecology: () => { ecologyClock = 99; },
   debug: { perf, renderer, composer, bloom, scene, grass, motes, sparkles, bridges, pathPreview, seeds, refreshWorld, paint, paintTo, flushRebuild, saveMap, state, buildGrid } };

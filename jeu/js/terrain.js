@@ -124,13 +124,13 @@ varying vec3 vWPos;
 ${NOISE_GLSL}
 vec3 grassColor(vec2 p) {
   float n1 = fbm(p * 0.9);
-  float n2 = fbm(p * 5.0 + 7.0);
+  float n2 = fbm3(p * 5.0 + 7.0);
   vec3 g = mix(vec3(0.30, 0.56, 0.36), vec3(0.56, 0.80, 0.48), smoothstep(0.25, 0.75, n1));
   g = mix(g, vec3(0.80, 0.92, 0.62), smoothstep(0.55, 0.85, n2) * 0.45);
   g *= 0.9 + 0.2 * vnoise(p * 34.0);
-  // Petites fleurs pâles, éparses.
+  // Petites fleurs pâles, éparses (leur teinte n'est calculée que là où il y en a).
   float fl = smoothstep(0.965, 0.99, vnoise(p * 13.0 + 3.1));
-  g = mix(g, mix(vec3(0.95, 0.85, 1.0), vec3(1.0, 0.95, 0.75), vnoise(p * 3.0)), fl);
+  if (fl > 0.0) g = mix(g, mix(vec3(0.95, 0.85, 1.0), vec3(1.0, 0.95, 0.75), vnoise(p * 3.0)), fl);
   return lin(g);
 }
 vec3 dirtColor(vec2 p) {
@@ -148,8 +148,16 @@ float caustics(vec2 p, float t) {
 vec2 wp = vWPos.xz;
 vec3 extraGlow = vec3(0.0);
 if (vSurf.y < 0.5) {
-  float edge = vSurf.x + (fbm(wp * 4.0) - 0.5) * 0.7;
-  diffuseColor.rgb = mix(dirtColor(wp), grassColor(wp), smoothstep(0.42, 0.58, edge));
+  // Le bruit de bord décale vSurf.x d'au plus [-0.35, +0.31] : hors de cette marge, une seule
+  // des deux couleurs est visible, inutile de calculer l'autre (ni le bruit de bord).
+  if (vSurf.x >= 0.93) diffuseColor.rgb = grassColor(wp);
+  else if (vSurf.x <= 0.11) diffuseColor.rgb = dirtColor(wp);
+  else {
+    float k = smoothstep(0.42, 0.58, vSurf.x + (fbm(wp * 4.0) - 0.5) * 0.7);
+    if (k <= 0.0) diffuseColor.rgb = dirtColor(wp);
+    else if (k >= 1.0) diffuseColor.rgb = grassColor(wp);
+    else diffuseColor.rgb = mix(dirtColor(wp), grassColor(wp), k);
+  }
 } else if (vSurf.y < 1.5) {
   diffuseColor.rgb = grassColor(wp + vWPos.y) * 0.8;
 } else if (vSurf.y < 2.5) {
@@ -157,7 +165,7 @@ if (vSurf.y < 0.5) {
   diffuseColor.rgb = vColor * strata * (0.9 + 0.2 * vnoise(vec2(wp.x + wp.y, vWPos.y) * 18.0));
 } else {
   float ripple = 0.5 + 0.5 * sin((wp.x + wp.y) * 9.0 + fbm(wp * 2.0) * 6.0);
-  diffuseColor.rgb = lin(mix(vec3(0.62, 0.62, 0.50), vec3(0.76, 0.74, 0.60), ripple * 0.6 + fbm(wp * 6.0) * 0.4));
+  diffuseColor.rgb = lin(mix(vec3(0.62, 0.62, 0.50), vec3(0.76, 0.74, 0.60), ripple * 0.6 + fbm3(wp * 6.0) * 0.4));
   extraGlow = vec3(0.45, 0.8, 1.0) * caustics(wp, uTime) * 0.35;
 }`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
@@ -197,17 +205,20 @@ function waterMaterial() {
       varying vec3 vW;
       varying float vShore;
       ${NOISE_GLSL}
-      float height(vec2 p) {
+      // Pente (d/dx, d/dz) de la surface : dérivées analytiques, une seule évaluation du bruit.
+      vec2 slope(vec2 p) {
         float t = uTime;
-        return sin(p.x * 1.7 + t * 1.6) * 0.016 + cos(p.y * 2.1 - t * 1.3) * 0.012
-             + (fbm(p * 2.2 + vec2(t * 0.25, t * 0.18)) - 0.5) * 0.05
-             + (vnoise(p * 9.0 - vec2(t * 0.6, -t * 0.4)) - 0.5) * 0.012;
+        vec2 g = vec2(cos(p.x * 1.7 + t * 1.6) * 0.016 * 1.7, -sin(p.y * 2.1 - t * 1.3) * 0.012 * 2.1);
+        g += fbmd(p * 2.2 + vec2(t * 0.25, t * 0.18), 1.0).yz * (0.05 * 2.2);
+        g += vnoised(p * 9.0 - vec2(t * 0.6, -t * 0.4)).yz * (0.012 * 9.0);
+        return g;
       }
+      // x^n pour x proche de 1 (reflets spéculaires) : exp2 seul, sans log.
+      float spec(float x, float n) { return exp2((x - 1.0) * n * 1.4427); }
       void main() {
         vec2 p = vW.xz;
-        float e = 0.04;
-        float h = height(p);
-        vec3 n = normalize(vec3(-(height(p + vec2(e, 0.0)) - h) / e, 1.0, -(height(p + vec2(0.0, e)) - h) / e));
+        vec2 g = slope(p);
+        vec3 n = normalize(vec3(-g.x, 1.0, -g.y));
         vec3 v = normalize(cameraPosition - vW);
         float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
         float depth = smoothstep(0.0, 1.8, vShore);
@@ -217,17 +228,20 @@ function waterMaterial() {
         // Reflet doux et éclats du soleil.
         vec3 r = reflect(-uSunDir, n);
         float rv = max(dot(r, v), 0.0);
-        col += uSun * (pow(rv, 140.0) * 3.0 + pow(rv, 14.0) * 0.18);
+        col += uSun * (spec(rv, 140.0) * 3.0 + spec(rv, 14.0) * 0.18);
         float sparkle = smoothstep(0.93, 1.0, vnoise(p * 22.0 + vec2(uTime * 0.9, -uTime * 0.7)))
                       * (0.5 + 0.5 * sin(uTime * 7.0 + p.x * 31.0 + p.y * 17.0));
         col += vec3(1.0, 0.97, 0.9) * sparkle * 1.6 * (0.4 + depth);
 
-        // Écume de contact + vaguelettes qui viennent mourir sur la rive.
-        float fn = vnoise(p * 7.0 + uTime * 0.35);
-        float contact = (1.0 - smoothstep(0.0, 0.2, vShore)) * smoothstep(0.3, 0.6, fn + 0.3);
-        float band = smoothstep(0.88, 1.0, sin(vShore * 13.0 + uTime * 2.2) * 0.5 + 0.5)
-                   * (1.0 - smoothstep(0.1, 0.85, vShore)) * smoothstep(0.35, 0.65, fn);
-        float foam = clamp(contact + band * 0.8, 0.0, 1.0);
+        // Écume de contact + vaguelettes qui viennent mourir sur la rive (nulles au large).
+        float foam = 0.0;
+        if (vShore < 0.85) {
+          float fn = vnoise(p * 7.0 + uTime * 0.35);
+          float contact = (1.0 - smoothstep(0.0, 0.2, vShore)) * smoothstep(0.3, 0.6, fn + 0.3);
+          float band = smoothstep(0.88, 1.0, sin(vShore * 13.0 + uTime * 2.2) * 0.5 + 0.5)
+                     * (1.0 - smoothstep(0.1, 0.85, vShore)) * smoothstep(0.35, 0.65, fn);
+          foam = clamp(contact + band * 0.8, 0.0, 1.0);
+        }
         col = mix(col, uFoam, foam * 0.85);
 
         float alpha = mix(0.62, 0.92, depth) + fres * 0.2 + foam * 0.5;

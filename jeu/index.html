@@ -7,7 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏝️</text></svg>">
   <style>
     :root {
-      --panel: rgba(30, 26, 60, 0.72);
+      --panel: rgba(30, 26, 60, 0.84);
       --panel-border: rgba(255, 255, 255, 0.12);
       --text: #f3f6fa;
       --muted: #a9b6c6;
@@ -33,7 +33,7 @@
       background: var(--panel);
       border: 1px solid var(--panel-border);
       border-radius: 12px;
-      backdrop-filter: blur(6px);
+      /* Pas de backdrop-filter : le flou serait recalculé à chaque image du canvas animé. */
       padding: 8px;
       display: flex;
       gap: 6px;

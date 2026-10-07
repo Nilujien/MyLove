@@ -43,7 +43,8 @@ export class Motes {
           vAlpha = twinkle * edge * smoothstep(0.0, 0.15, rise) * (1.0 - smoothstep(0.7, 1.0, rise));
           vCol = mix(vec3(1.0, 0.92, 0.7), seed.w > 0.5 ? vec3(0.75, 0.95, 1.0) : vec3(1.0, 0.8, 0.95), seed.z);
           gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
-          gl_PointSize = (4.0 + seed.w * 7.0) * uScale * uPixel;
+          // Plafonnée : à fort zoom, de très gros points coûtent cher en remplissage.
+          gl_PointSize = min((4.0 + seed.w * 7.0) * uScale, 24.0) * uPixel;
         }`,
       fragmentShader: /* glsl */ `
         varying float vAlpha;
